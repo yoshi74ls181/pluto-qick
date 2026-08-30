@@ -11,9 +11,21 @@ work=$here/work; mkdir -p "$work"; cd "$work"
 SG=$QICK_ROOT/firmware/ip/axis_signal_gen_v6/src
 HDL=$QICK_ROOT/firmware/hdl
 
+# tb_ndds_equiv  : phase-generation path (ctrl_sg_v6 alone)
+# tb_ndds_envmux : envelope fetch + source mux + gain (signal_gen, GEN_DDS=FALSE)
 xvlog -sv --nolog \
   "$HDL/fifo_xpm.sv" \
   "$SG/ctrl_sg_v6.sv" \
-  "$here/tb_ndds_equiv.sv" || exit 1
-xelab -L xpm --nolog --timescale 1ns/1ps -debug typical tb_ndds_equiv -s tb_snap || exit 1
-xsim tb_snap --runall --nolog
+  "$SG/latency_reg.v" \
+  "$SG/signal_gen.v" \
+  "$here/tb_ndds_equiv.sv" \
+  "$here/tb_ndds_envmux.sv" || exit 1
+
+rc=0
+for tb in tb_ndds_equiv tb_ndds_envmux; do
+    echo ""
+    echo "################ $tb ################"
+    xelab -L xpm --nolog --timescale 1ns/1ps -debug typical $tb -s ${tb}_snap || { rc=1; continue; }
+    xsim ${tb}_snap --runall --nolog || rc=1
+done
+exit $rc

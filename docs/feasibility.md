@@ -77,10 +77,11 @@ generator/readout drivers.
 
 ## Not yet verified
 
-- ~~`N_DDS=1` functional correctness~~ — **now verified for the phase path.**
-  See [ndds1-simulation.md](ndds1-simulation.md). Still uncovered at N_DDS=1:
-  the DDS compiler output itself, envelope-memory addressing (`mem_addr_o`),
-  and the output multiplexer.
+- ~~`N_DDS=1` functional correctness~~ — **verified for the phase path, the
+  envelope fetch and the output mux.** See
+  [ndds1-simulation.md](ndds1-simulation.md). Still uncovered: the DDS
+  compiler's own output at `N_DDS=1`, `ENVELOPE_TYPE="COMPLEX"`, and the
+  AXI-Lite path.
 - `axis_avg_buffer` resource cost.
 - Post-route timing.
 - I/Q pairing: the siggen emits a real stream for an RF-DAC, so complex output

@@ -51,15 +51,55 @@ and each clock emits `N_DDS` samples, so a waveform of `L` samples needs
 This matters for the software port: any `nsamp` computation must divide by
 `N_DDS`.
 
+## Envelope fetch and output mux — `sim/tb_ndds_envmux.sv`
+
+**Result: PASS.**
+
+```
+--- src=2 : best sample shift = 3   output: 0 mismatch(es) over 96 samples   mem_addr_o: 0 step(s) != +1
+--- src=3 : best sample shift = -16 output: 0 mismatch(es) over 96 samples   mem_addr_o: 0 step(s) != +1
+--- src=1 : best sample shift = -8  output: 0 mismatch(es) over 96 samples   mem_addr_o: 0 step(s) != +1
+--- src=0 : best sample shift = 3   output: 0 mismatch(es) over 96 samples   mem_addr_o: 0 step(s) != +1
+RESULT: PASS - all four source selections agree
+```
+
+The envelope is stored **interleaved** across `N_DDS` block RAMs — lane `i` at
+address `a` holds sample `a*N_DDS + i` — and `addr_cnt` advances by 1 per clock
+regardless of `N_DDS`. The test models that contract with a one-clock-latency
+memory on each DUT and compares output streams for every source selection:
+`0` product, `1` DDS, `2` envelope, `3` zero.
+
+**Read the two vacuous passes with care.** With `GEN_DDS="FALSE"` the DDS
+becomes a full-scale constant, so `src=1` emits a constant and `src=3` emits
+zero. Those match at *any* shift, which is why their reported best-shift is
+arbitrary (`-8`, `-16`). Only `src=2` and `src=0` genuinely exercise the
+envelope path. Testing `src=1` meaningfully needs the regenerated 7-series DDS
+in the loop.
+
+The two meaningful cases both landed on **shift = 3**, which is a useful
+self-consistency check: `L` clocks of pipeline latency displaces the
+`N_DDS=4` reference by `4L` samples and the `N_DDS=1` candidate by `L`, so the
+relative offset is `3L`. Shift 3 implies `L = 1` — exactly the one-clock memory
+latency modelled. A wrong interleaving would not produce a clean single-shift
+match at all.
+
+### A third trap
+
+The first version of this test used a *zero-latency* combinational memory and
+failed all 96 samples on both envelope selections. That was the testbench, not
+the design: real BRAM has read latency, and `signal_gen`'s `latency_reg` stages
+are there to align it. Because one address feeds `N_DDS` samples, a latency of
+`L` clocks shifts the two configurations by *different sample counts*, so raw
+sequence comparison cannot work — the comparison has to be shift-tolerant.
+
 ## Not covered
 
-The test isolates `ctrl_sg_v6`, so it says nothing about:
-
 - the DDS compiler's own output at `N_DDS=1` (needs the regenerated 7-series IP
-  in the loop)
-- envelope-memory addressing, `mem_addr_o`
-- the output multiplexer and gain path
+  in the loop); consequently `src=0`/`src=1` are only tested with the DDS
+  stubbed to a constant
 - a sweep over `PINC`, waveform length, or `phrst`/`stdysel` combinations
+- `ENVELOPE_TYPE="COMPLEX"` (both tests drive `mem_dout_imag_i = 0`)
+- the AXI-Lite register path and the real `axis_signal_gen_v6` top level
 
 ## Reproducing
 
