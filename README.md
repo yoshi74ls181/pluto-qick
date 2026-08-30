@@ -44,12 +44,28 @@ stubs/                  stand-ins for RFSoC-only IP that ARITH=0 excludes
 Upstream QICK is **fetched, never vendored** — `patches/` shows exactly what we
 change and attribution stays unambiguous.
 
+## Where work happens
+
+| What | Where |
+|---|---|
+| Firmware, simulation, synthesis, docs | **this repo** |
+| Python (`QickSoc`/`RFDC` → AD9361 backend, driver changes) | [`yoshi74ls181/qick`](https://github.com/yoshi74ls181/qick), branch `e200-ad9361-backend` |
+
+Python changes belong in the QICK fork so they stay rebaseable on upstream and
+can be offered back as a PR. This repo keeps only what is genuinely
+E200-specific.
+
 ## Next step
 
-Simulate `axis_signal_gen_v6` at `N_DDS=1` against QICK's own testbench. It
-synthesises, but QICK only ever ships `N_DDS≥4`, so the per-lane phase-advance
-semantics at a single lane are unproven — and every later integration decision
-rests on that being sound.
+`N_DDS=1` is verified for the phase path
+([docs/ndds1-simulation.md](docs/ndds1-simulation.md)). Remaining before
+integration:
+
+1. Extend the simulation to cover envelope addressing (`mem_addr_o`) and the
+   output mux at `N_DDS=1`, with the regenerated 7-series DDS in the loop.
+2. Synthesize `axis_avg_buffer` — the last unmeasured block.
+3. First overlay: tProc v2 + 1 gen + 1 readout into the antsdr-pynq `template`
+   overlay insertion point.
 
 ## Licence
 
