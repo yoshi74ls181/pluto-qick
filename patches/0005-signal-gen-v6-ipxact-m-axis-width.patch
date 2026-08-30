@@ -1,0 +1,28 @@
+Subject: [PATCH] signal-gen-v6: widen m_axis in IP-XACT to match complex RTL
+
+Completes patch 0002. That patch restored the imaginary partial products so
+signal_gen.v drives {Q,I} per lane and widened the RTL port to N_DDS*32-1, but
+left component.xml declaring
+
+    spirit:dependency="((spirit:decode(id('MODELPARAM_VALUE.N_DDS')) * 16) - 1)"
+
+The mismatch is invisible to the OOC synthesis harness in syn/, which
+instantiates the RTL module directly and never reads the IP-XACT metadata. It
+only shows up in the block-design flow, where Vivado sizes the interface from
+component.xml: at N_DDS=1 m_axis came out 16 bits wide and would have silently
+carried only the real part.
+
+With this applied, N_DDS=1 gives a 32-bit m_axis -- one complex sample per
+clock, which is exactly what the AD9361's dac_data_i0/dac_data_q0 pair wants.
+
+--- a/firmware/ip/axis_signal_gen_v6/component.xml
++++ b/firmware/ip/axis_signal_gen_v6/component.xml
+@@ -1025,7 +1025,7 @@
+         <spirit:wire>
+           <spirit:direction>out</spirit:direction>
+           <spirit:vector>
+-            <spirit:left spirit:format="long" spirit:resolve="dependent" spirit:dependency="((spirit:decode(id(&apos;MODELPARAM_VALUE.N_DDS&apos;)) * 16) - 1)">255</spirit:left>
++            <spirit:left spirit:format="long" spirit:resolve="dependent" spirit:dependency="((spirit:decode(id(&apos;MODELPARAM_VALUE.N_DDS&apos;)) * 32) - 1)">511</spirit:left>
+             <spirit:right spirit:format="long">0</spirit:right>
+           </spirit:vector>
+           <spirit:wireTypeDefs>
