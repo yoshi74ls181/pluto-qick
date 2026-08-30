@@ -67,6 +67,27 @@ integration:
 3. First overlay: tProc v2 + 1 gen + 1 readout into the antsdr-pynq `template`
    overlay insertion point.
 
+## Toolchain setup
+
+`setup/xilinx-env.sh` defines `use_vivado`, `use_vitis`, `use_petalinux` and
+`xilinx_env`. Source it from `~/.bashrc`:
+
+```sh
+_xe="$HOME/pluto/pluto-qick/setup/xilinx-env.sh"
+[ -r "$_xe" ] && source "$_xe"; unset _xe
+```
+
+It deliberately activates **nothing** at login. Sourcing the Xilinx settings
+scripts eagerly is harmful: `settings64.sh` sets `LD_LIBRARY_PATH`, and bitbake
+refuses to run when it is set (`Your environment is misconfigured`), so the
+`make pynq` flow needs a shell where it ends up unset. PetaLinux's
+`settings.sh` also prints a banner and runs checks on every login, and each
+sourcing appends to `PATH`.
+
+`use_petalinux` encodes the order the antsdr-pynq build needs — Vitis first,
+then PetaLinux, `LD_LIBRARY_PATH` cleared, and `/opt/qemu/bin` ahead of the
+distro's qemu 4.2.1 since sdbuild requires 5.2.0.
+
 ## Licence
 
 MIT, matching QICK. See [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md) — note
