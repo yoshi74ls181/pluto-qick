@@ -11,10 +11,11 @@ synthesis. Reproduce with `syn/run.sh` (see below).
 | **tProc v2** (`ARITH=0 DIVIDER=0 PMEM_AW=10 DMEM_AW=10 WMEM_AW=8`, 2 wave ports) | 5,758 | 5,290 | 19 | 1 |
 | `axis_signal_gen_v6` (`N_DDS=1 N=12`) | 758 | 1,516 | 8.5 | 3 |
 | `axis_readout_v2` (`N_DDS=1`) | 1,662 | 3,336 | 16 | 2 |
-| **1 TX + 1 RX total** | **21,123 (40%)** | **30,533 (29%)** | **47.5 (34%)** | **34 (15%)** |
+| `axis_avg_buffer` (`N_AVG=10 N_BUF=10 B=16`) | 732 | 1,230 | 4 | 0 |
+| **1 TX + 1 RX total** | **21,855 (41%)** | **31,763 (30%)** | **51.5 (37%)** | **34 (15%)** |
 
 xc7z020 has 53,200 LUT / 106,400 FF / 140 BRAM / 220 DSP. A 2 TX + 2 RX build
-lands near 48% LUT and 66% BRAM. `axis_avg_buffer` is **not** in that total.
+lands near 50% LUT and 71% BRAM. **All blocks are now measured.**
 
 All blocks inferred 7-series primitives only (RAMB36E1/RAMB18E1, DSP48E1) — no
 DSP48E2 or URAM leaked in.
@@ -84,8 +85,9 @@ generator/readout drivers.
   AXI-Lite path.
 - `axis_avg_buffer` resource cost.
 - Post-route timing.
-- I/Q pairing: the siggen emits a real stream for an RF-DAC, so complex output
-  must be routed from `mem_dob_real`/`mem_dob_imag`.
+- See [complex-output.md](complex-output.md) — `axis_signal_gen_v6` emits a
+  **real** stream even with `ENVELOPE_TYPE="COMPLEX"`, which is the one
+  identified change that needs actual HDL work rather than configuration.
 
 ## Reproducing
 
