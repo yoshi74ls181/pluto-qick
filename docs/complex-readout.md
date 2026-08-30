@@ -85,3 +85,22 @@ One simulator note: `import_ip` of QICK's DDS lands **locked**, because the
 `.xci` was customised for `xczu49dr`. `upgrade_ip` retargets it. The block-design
 flow does this automatically when the DDS is pulled in as a subcore, which is why
 this only bites in a standalone sim project.
+
+## Confirmed on hardware
+
+The overlay has been loaded on a real E200 and QICK's discovery reports the
+readout as expected:
+
+    axis_readout_v2 - fs=15.360 Msps, decimated=1.920 MHz, 32-bit DDS
+    axis_avg_buffer v1.2 (has edge counter, no weights)
+    memory 16384 accumulated, 4096 decimated
+    triggered by tport 0, pin 0, feedback to tProc input 0
+
+`decimated = fs/8` is the regenerated 1-lane FIR doing its decimate-by-8 at one
+sample per clock, which is the part of this change that could not be checked
+without hardware. `tools/smoke_e200.py` reproduces the run.
+
+Sample rate is read back from the AD9361 rather than assumed: reprogramming the
+PL resets `axi_ad9361` and the driver re-establishes the rate. It moved from
+30.72 to 15.36 MHz across a load here, so a value captured beforehand would
+have described the wrong hardware.
