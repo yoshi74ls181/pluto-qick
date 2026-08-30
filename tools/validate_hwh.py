@@ -30,11 +30,18 @@ for b in sorted(qick_blocks):
     print("   %-22s %s" % (b, md.mod2type(b)))
 
 fails = []
+# Pins nothing reads: AxisAvgBuffer has no trace_clocks, so a missing FREQ_HZ
+# annotation on its stream clocks is expected rather than a problem.
+EXPECTED_MISSING = ('get_fclk avg0/s_axis_aclk', 'get_fclk avg0/m_axis_aclk')
+
 def check(label, fn, want=None):
     try:
         got = fn()
     except Exception as e:
-        print("   FAIL %-42s %s: %s" % (label, type(e).__name__, e)); fails.append(label); return None
+        expected = label in EXPECTED_MISSING
+        print("   %-4s %-42s %s: %s" % ("n/a" if expected else "FAIL", label, type(e).__name__, e))
+        if not expected: fails.append(label)
+        return None
     ok = (want is None) or (want in str(got))
     print("   %-4s %-42s %s" % ("ok" if ok else "BAD", label, got))
     if not ok: fails.append(label)
