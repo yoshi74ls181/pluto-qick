@@ -77,11 +77,10 @@ generator/readout drivers.
 
 ## Not yet verified
 
-- **`N_DDS=1` synthesises, but is not proven functionally correct.** The
-  IP-XACT permits `minimum="1"`, yet QICK only ships `N_DDS≥4`. The
-  interpolation and per-lane phase-advance semantics at one lane need
-  simulation against QICK's testbenches before being trusted. **This is the
-  next thing to check.**
+- ~~`N_DDS=1` functional correctness~~ — **now verified for the phase path.**
+  See [ndds1-simulation.md](ndds1-simulation.md). Still uncovered at N_DDS=1:
+  the DDS compiler output itself, envelope-memory addressing (`mem_addr_o`),
+  and the output multiplexer.
 - `axis_avg_buffer` resource cost.
 - Post-route timing.
 - I/Q pairing: the siggen emits a real stream for an RF-DAC, so complex output

@@ -1,0 +1,7 @@
+0.7
+2020.2
+Apr 18 2022
+15:53:03
+/home/slab/pluto/pluto-qick/sim/tb_ndds_equiv.sv,1788057265,systemVerilog,,,,tb_ndds_equiv,,,,,,,,
+/home/slab/pluto/pluto-qick/third_party/qick/firmware/hdl/fifo_xpm.sv,1788055991,systemVerilog,,/home/slab/pluto/pluto-qick/third_party/qick/firmware/ip/axis_signal_gen_v6/src/ctrl_sg_v6.sv,,fifo_xpm,,,,,,,,
+/home/slab/pluto/pluto-qick/third_party/qick/firmware/ip/axis_signal_gen_v6/src/ctrl_sg_v6.sv,1788055991,systemVerilog,,/home/slab/pluto/pluto-qick/sim/tb_ndds_equiv.sv,,ctrl_sg_v6,,,,,,,,
