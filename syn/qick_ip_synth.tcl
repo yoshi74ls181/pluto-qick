@@ -9,6 +9,10 @@
 set cfg [lindex $argv 0]
 if {![file exists $cfg]} { puts "ERROR: no such config: $cfg"; exit 1 }
 
+# Exposed to configs so they can reference repo paths without guessing at
+# `info script`, which inside a sourced config points at the config itself.
+set repo_root [file normalize [file dirname [info script]]/..]
+
 # Defaults, overridable by the config.
 set part        xc7z020clg484-1
 set generics    {}

@@ -4,7 +4,7 @@ set name   tproc_v2_minimal
 set qick   $env(QICK_ROOT)
 set top    axis_qick_processor
 set src_dirs [list $qick/firmware/ip/qick_processor/src]
-set extra_files [list [file normalize [file dirname [info script]]/../stubs/dsp_macro_0_stub.v]]
+set extra_files [list $repo_root/stubs/dsp_macro_0_stub.v]
 set generics {
     ARITH=0 DIVIDER=0 LFSR=1 DEBUG=0 QCOM=0 QNET=0 CUSTOM_PERIPH=0
     PMEM_AW=10 DMEM_AW=10 WMEM_AW=8 REG_AW=4
