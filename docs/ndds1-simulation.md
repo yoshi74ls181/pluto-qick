@@ -108,3 +108,53 @@ export QICK_ROOT=$PWD/third_party/qick
 source /tools/Xilinx/Vitis/2022.1/settings64.sh
 ./sim/run_sim.sh
 ```
+
+## Complex envelope with the DDS in the loop — `sim/tb_ndds_complex.sv`
+
+**Result: agrees to within ~6 LSB, not bit-exactly.** Run over two `PINC`
+values:
+
+| `PINC` | max abs difference | distribution (LSB) |
+|---|---|---|
+| 8,000,000 | 6 LSB (−74.7 dBFS) | 0:59 1:23 2:13 3:13 4:1 >4:3 |
+| 1,048,576 (2^20) | 4 LSB (−78.3 dBFS) | 0:65 1:18 2:16 3:11 4:2 >4:0 |
+
+Both land on sample shift 3, the expected `3L` for one clock of memory latency.
+
+Exact equality is **not** the right criterion here. `ctrl_sg_v6` computes the
+base phase `pinc * cnt_n` through a DSP-friendly approximation — its own comment
+says the exact "48bits multiplier and mod32 operation doesn't map to DSPs and
+doesn't meet timing" — and `cnt_n` advances by `N_DDS`, so the truncation
+differs between configurations. The magnitude is `PINC`-dependent, which
+supports that explanation, though it does not vanish even for a power-of-two
+`PINC`, so truncation is not the whole story.
+
+**Honest reading:** the difference is bounded and tiny (≤6 LSB of 16-bit full
+scale, ≈0.01° equivalent phase error) and is a numerical property of the phase
+pipeline, not a structural `N_DDS=1` defect. The 4-LSB tolerance in the
+testbench is arbitrary and one configuration exceeds it; treat the reported
+maximum as the result rather than the pass/fail line.
+
+### A fourth trap: verify IP customisation, do not assume it
+
+`set_property -dict` silently drops parameters it does not accept. Two were lost
+that way and both mattered:
+
+- **`Phase_Offset {Streaming}`** — without it the DDS has no phase-offset input,
+  so the per-lane offsets in `dds_ctrl` are discarded and every lane runs at the
+  same phase. Symptom was a 100% mismatch.
+- **`Latency`** — QICK's IP is `Latency_Configuration=Configurable, Latency=10`,
+  and `signal_gen.v` is written against that ("// Latency: 10") with matching
+  `latency_reg` delays. `Auto` picks **9** on 7-series, breaking the alignment.
+
+`sim/run_sim_dds.tcl` now applies each parameter individually and reads it back,
+printing `DDSCFG ok` / `MISMATCH` per parameter. The synthesis configs were
+corrected the same way, so `syn/` and `sim/` now build the same IP.
+
+### A fifth trap: bounds-check shift searches
+
+A SystemVerilog queue read outside its range silently returns 0, which can
+manufacture a false match. An early version searched shifts down to `-16` from a
+window starting at index 8, reading negative indices and reporting a clean
+"pass" against zeros. Both testbenches now restrict the search to shifts whose
+entire comparison window is in range.

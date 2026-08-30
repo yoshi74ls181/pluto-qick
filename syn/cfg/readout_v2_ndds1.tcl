@@ -14,6 +14,8 @@ set ip_recreate {
         CONFIG.DDS_Clock_Rate {122.88}
         CONFIG.Output_Width {16}
         CONFIG.Phase_Increment {Streaming}
+        CONFIG.Phase_Offset {Streaming}
+        CONFIG.Resync {true}
         CONFIG.Output_Selection {Sine_and_Cosine}
     }}
     {fir_compiler_0 fir_compiler {

@@ -17,6 +17,8 @@ set ip_recreate {
         CONFIG.Spurious_Free_Dynamic_Range {96}
         CONFIG.Frequency_Resolution {0.06}
         CONFIG.Phase_Increment {Streaming}
+        CONFIG.Phase_Offset {Streaming}
+        CONFIG.Resync {true}
         CONFIG.Output_Selection {Sine_and_Cosine}
     }}
 }

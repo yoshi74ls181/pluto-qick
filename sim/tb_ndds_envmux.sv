@@ -141,20 +141,28 @@ task automatic one_pass(input [1:0] outsel);
    // A constant sample shift between the streams is expected: L clocks of
    // pipeline latency displaces the reference by L*NREF samples and the
    // candidate by L. Find the shift, then require an exact match under it.
+   // Bounds-checked shift search. A queue read outside range silently returns
+   // 0 in SystemVerilog, which can manufacture a false match -- so only shifts
+   // whose entire comparison window is in range are considered.
    begin
-      int best_shift = 0, best_bad = 1<<30, win;
-      win = n - 4*NREF;                 // leave room for the shift search
+      int best_shift = 0, best_bad = -1, lo, hi, b;
+      lo = 2*NREF; hi = n - 2*NREF;
       for (int sh = -(4*NREF); sh <= 4*NREF; sh++) begin
-         int b = 0;
-         for (int s = 2*NREF; s < win; s++)
+         if (lo + sh < 0)                 continue;
+         if (hi - 1 + sh >= o_cnd.size()) continue;
+         b = 0;
+         for (int s = lo; s < hi; s++)
             if (o_ref[s] !== o_cnd[s + sh]) b++;
-         if (b < best_bad) begin best_bad = b; best_shift = sh; end
+         if (best_bad < 0 || b < best_bad) begin best_bad = b; best_shift = sh; end
+      end
+      if (best_bad < 0) begin
+         $display("    INCONCLUSIVE - no in-range shift"); fail_total++; return;
       end
       bad = best_bad;
-      $display("    best sample shift = %0d", best_shift);
+      $display("    best sample shift = %0d (over %0d compared)", best_shift, hi - lo);
       if (bad) begin
          int shown = 0;
-         for (int s = 2*NREF; s < win && shown < 4; s++)
+         for (int s = lo; s < hi && shown < 4; s++)
             if (o_ref[s] !== o_cnd[s + best_shift]) begin
                $display("    MISMATCH s=%0d ref=%04h cnd=%04h",
                         s, o_ref[s], o_cnd[s + best_shift]);
