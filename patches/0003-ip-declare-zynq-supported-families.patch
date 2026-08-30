@@ -1,0 +1,42 @@
+Subject: [PATCH] ip: declare zynq support for signal_gen_v6 and readout_v2
+
+axis_signal_gen_v6 and axis_readout_v2 declare only <spirit:family>zynquplus
+in their IP-XACT supportedFamilies block, so create_bd_cell refuses them on a
+Zynq-7000 part:
+
+    ERROR: [BD 5-683] VLNV <QICK:QICK:axis_signal_gen_v6:1.0> is not supported
+    for the current part.
+
+This is purely a declaration: qick_processor and axis_avg_buffer ship no
+supportedFamilies block at all and instantiate on xc7z020clg400-2 unmodified.
+Adding zynq alongside zynquplus is enough for both IP to instantiate AND to
+generate -- Vivado retargets the DDS/FIR subcores to the 7-series part itself,
+preserving the parameters the RTL depends on (Phase_Width 32, Latency 10,
+Phase_Increment Streaming, Resync, SFDR 96) and the 121-tap fir.coe.
+
+diff --git a/firmware/ip/axis_readout_v2/component.xml b/firmware/ip/axis_readout_v2/component.xml
+index 438b36e..9307766 100644
+--- a/firmware/ip/axis_readout_v2/component.xml
++++ b/firmware/ip/axis_readout_v2/component.xml
+@@ -1151,7 +1151,7 @@
+   <spirit:vendorExtensions>
+     <xilinx:coreExtensions>
+       <xilinx:supportedFamilies>
+-        <xilinx:family xilinx:lifeCycle="Production">zynquplus</xilinx:family>
++        <xilinx:family xilinx:lifeCycle="Production">zynquplus</xilinx:family><xilinx:family xilinx:lifeCycle="Production">zynq</xilinx:family>
+       </xilinx:supportedFamilies>
+       <xilinx:taxonomies>
+         <xilinx:taxonomy>/QICK/Readout</xilinx:taxonomy>
+diff --git a/firmware/ip/axis_signal_gen_v6/component.xml b/firmware/ip/axis_signal_gen_v6/component.xml
+index 0e8052c..c515f2c 100644
+--- a/firmware/ip/axis_signal_gen_v6/component.xml
++++ b/firmware/ip/axis_signal_gen_v6/component.xml
+@@ -1282,7 +1282,7 @@
+   <spirit:vendorExtensions>
+     <xilinx:coreExtensions>
+       <xilinx:supportedFamilies>
+-        <xilinx:family xilinx:lifeCycle="Production">zynquplus</xilinx:family>
++        <xilinx:family xilinx:lifeCycle="Production">zynquplus</xilinx:family><xilinx:family xilinx:lifeCycle="Production">zynq</xilinx:family>
+       </xilinx:supportedFamilies>
+       <xilinx:taxonomies>
+         <xilinx:taxonomy>/QICK/Signal_Generator</xilinx:taxonomy>

@@ -1,0 +1,56 @@
+Subject: [PATCH] ip: drop cell_name from JSON .xci for Vivado 2022.1 schema
+
+Some subcore .xci files were written by a newer Vivado that records a
+"cell_name" provenance field under ip_inst. The 2022.1 JSON schema disallows
+it, so subcore recreation fails and the parent IP cannot be generated:
+
+    ERROR: [IP_Flow 19-8166] Failed to verify json document against the schema
+    'xilinx.com:schema:json_instance:1.0'.
+    { "additionalProperties": { "disallowed": "cell_name", ... } }
+    CRITICAL WARNING: [IP_Flow 19-979] Failed to recreate IP instance
+    'fir_compiler_0'. Error setting original project options.
+
+axis_signal_gen_v6's DDS has no cell_name, which is why it generated while
+axis_readout_v2 (FIR and DDS) did not. The field carries no configuration, so
+removing it is safe; with it gone all four IP generate for xc7z020clg400-2.
+
+Note qick_processor's dsp_macro_0 generates but keeps a_width/d_width 27,
+which a DSP48E1 (25x18) cannot hold in one slice -- the overlay still builds
+qick_processor with ARITH=0 and stubs dsp_macro out.
+
+diff --git a/firmware/ip/axis_readout_v2/src/dds_compiler_0/dds_compiler_0.xci b/firmware/ip/axis_readout_v2/src/dds_compiler_0/dds_compiler_0.xci
+index 5435361..84320d2 100644
+--- a/firmware/ip/axis_readout_v2/src/dds_compiler_0/dds_compiler_0.xci
++++ b/firmware/ip/axis_readout_v2/src/dds_compiler_0/dds_compiler_0.xci
+@@ -2,7 +2,6 @@
+   "schema": "xilinx.com:schema:json_instance:1.0",
+   "ip_inst": {
+     "xci_name": "dds_compiler_0",
+-    "cell_name": "readout_top_i/down_conversion_fir_i/down_conversion_i/GEN_dds[0].dds_i/dds_compiler_0",
+     "component_reference": "xilinx.com:ip:dds_compiler:6.0",
+     "ip_revision": "22",
+     "gen_directory": "../../../../projects/qick_tprocv2_216_demo/top/top.tmp/axis_readout_v2_v1_0_project/axis_readout_v2_v1_0_project.gen/sources_1/ip/dds_compiler_0",
+diff --git a/firmware/ip/axis_readout_v2/src/fir_compiler_0/fir_compiler_0.xci b/firmware/ip/axis_readout_v2/src/fir_compiler_0/fir_compiler_0.xci
+index 40ecae5..4d3ecbc 100644
+--- a/firmware/ip/axis_readout_v2/src/fir_compiler_0/fir_compiler_0.xci
++++ b/firmware/ip/axis_readout_v2/src/fir_compiler_0/fir_compiler_0.xci
+@@ -2,7 +2,6 @@
+   "schema": "xilinx.com:schema:json_instance:1.0",
+   "ip_inst": {
+     "xci_name": "fir_compiler_0",
+-    "cell_name": "readout_top_i/down_conversion_fir_i/fir_i/fir_compiler_0",
+     "component_reference": "xilinx.com:ip:fir_compiler:7.2",
+     "ip_revision": "19",
+     "gen_directory": "../../../../projects/qick_tprocv2_216_demo/top/top.tmp/axis_readout_v2_v1_0_project/axis_readout_v2_v1_0_project.gen/sources_1/ip/fir_compiler_0",
+diff --git a/firmware/ip/qick_processor/src/dsp_macro_0/dsp_macro_0.xci b/firmware/ip/qick_processor/src/dsp_macro_0/dsp_macro_0.xci
+index 30bd7cf..0764478 100644
+--- a/firmware/ip/qick_processor/src/dsp_macro_0/dsp_macro_0.xci
++++ b/firmware/ip/qick_processor/src/dsp_macro_0/dsp_macro_0.xci
+@@ -2,7 +2,6 @@
+   "schema": "xilinx.com:schema:json_instance:1.0",
+   "ip_inst": {
+     "xci_name": "dsp_macro_0",
+-    "cell_name": "QPROC/arith/dsp_macro_0",
+     "component_reference": "xilinx.com:ip:dsp_macro:1.0",
+     "ip_revision": "3",
+     "gen_directory": "../../../../projects/qick_tprocv2_216_demo/top/top.tmp/qick_processor_v2_0_project/qick_processor_v2_0_project.gen/sources_1/ip/dsp_macro_0",
