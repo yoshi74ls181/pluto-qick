@@ -1,0 +1,19 @@
+# Vivado / build output
+*.jou
+*.log
+*.str
+.Xil/
+vivado*.backup.jou
+vivado*.backup.log
+build/
+proj/
+out/
+
+# trial-synthesis projects and reports (regenerate with syn/run.sh)
+syn/work/
+
+# upstream QICK checkout (fetched, never vendored)
+third_party/qick/
+
+__pycache__/
+*.pyc
