@@ -10,7 +10,7 @@ set here [file normalize [file dirname [info script]]]
 set work $here/work/dds
 file mkdir $work
 
-create_project -force ddssim $work/proj -part xc7z020clg484-1
+create_project -force ddssim $work/proj -part xc7z020clg400-2
 
 # Same customisation as syn/cfg/signal_gen_v6_ndds1.tcl, so synthesis and
 # simulation see the same DDS.

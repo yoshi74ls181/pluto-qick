@@ -14,7 +14,7 @@ if {![file exists $cfg]} { puts "ERROR: no such config: $cfg"; exit 1 }
 set repo_root [file normalize [file dirname [info script]]/..]
 
 # Defaults, overridable by the config.
-set part        xc7z020clg484-1
+set part        xc7z020clg400-2
 set generics    {}
 set clocks      {}
 set ip_recreate {}

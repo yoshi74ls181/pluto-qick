@@ -1,7 +1,8 @@
 # Feasibility: QICK tProc v2 on the AntSDR E200
 
-All numbers measured on `xc7z020clg484-1`, Vivado 2022.1, out-of-context
-synthesis. Reproduce with `syn/run.sh` (see below).
+All numbers measured on `xc7z020clg400-2` — the part the E200 actually uses,
+per `boards/e200/*/antsdre200/system_project.tcl` — with Vivado 2022.1,
+out-of-context synthesis. Reproduce with `syn/run.sh` (see below).
 
 ## Resource budget — not the constraint
 
@@ -22,12 +23,16 @@ DSP48E2 or URAM leaked in.
 
 ## Timing
 
-tProc v2 constrained at 122.88 MHz (4 × 30.72 MSPS, the antsdr-pynq template
-overlay clock): **WNS +0.387 ns**, post-synthesis. QICK runs the tProc at
-215.04 MHz on ZCU216, so we ask less of a slower fabric.
+tProc v2 constrained at 122.88 MHz (4 × 30.72 MSPS, the AD9361 `l_clk` that
+already drives the ADC/DAC FIFOs): **WNS +1.878 ns**, post-synthesis — 23% of
+the 8.138 ns period. QICK runs the tProc at 215.04 MHz on ZCU216, so we ask
+less of a slower fabric.
 
-Caveat: +0.387 ns of an 8.138 ns period is 4.8% margin, and this is
-**post-synthesis, out-of-context**. Post-route will be worse and is unverified.
+Earlier revisions of this document quoted **+0.387 ns**. That was measured
+against `xc7z020clg484-1`, which I had assumed was the part; the E200 is
+actually **clg400-2**, a faster speed grade. Logic resources are unaffected
+(same die), but every timing number improved. Still **post-synthesis,
+out-of-context** — post-route remains unverified.
 
 ## Porting blockers
 

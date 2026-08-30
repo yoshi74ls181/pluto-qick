@@ -1,1 +1,0 @@
--L "xpm" --nolog --timescale "1ns/1ps" -debug "typical" "tb_ndds_equiv" -s "tb_ndds_equiv_snap" 

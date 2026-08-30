@@ -9,8 +9,9 @@ build/
 proj/
 out/
 
-# trial-synthesis projects and reports (regenerate with syn/run.sh)
+# trial-synthesis and simulation output (regenerate with syn/run.sh, sim/run_sim.sh)
 syn/work/
+sim/work/
 
 # upstream QICK checkout (fetched, never vendored)
 third_party/qick/
