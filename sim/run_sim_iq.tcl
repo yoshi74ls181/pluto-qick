@@ -7,10 +7,10 @@
 
 set qick $env(QICK_ROOT)
 set here [file normalize [file dirname [info script]]]
-set work $here/work/dds
+set work $here/work/iq
 file mkdir $work
 
-create_project -force ddssim $work/proj -part xc7z020clg484-1
+create_project -force iqsim $work/proj -part xc7z020clg484-1
 
 # Same customisation as syn/cfg/signal_gen_v6_ndds1.tcl, so synthesis and
 # simulation see the same DDS.
@@ -66,20 +66,11 @@ add_files -norecurse [list \
   $SG/ctrl_sg_v6.sv \
   $SG/latency_reg.v \
   $SG/signal_gen.v ]
-add_files -fileset sim_1 -norecurse $here/tb_ndds_complex.sv
+add_files -fileset sim_1 -norecurse $here/tb_iq_ssb.sv
 catch { set_property file_type {SystemVerilog} [get_files *.sv] }
 
-set_property top tb_ndds_complex [get_filesets sim_1]
+set_property top tb_iq_ssb [get_filesets sim_1]
 set_property -name {xsim.simulate.runtime} -value {all} -objects [get_filesets sim_1]
 
-# Probe the truncation hypothesis: a PINC that divides evenly should not suffer
-# the base-phase DSP rounding, so the two configurations should agree exactly.
-set pincs [list 8000000 1048576]
-foreach pv $pincs {
-   set_property -name {xsim.simulate.xsim.more_options} \
-      -value "-testplusarg PINC=$pv" -objects [get_filesets sim_1]
-   puts "######## PINC = $pv ########"
-   launch_simulation
-   close_sim
-}
+launch_simulation
 puts "SIM_LAUNCHED"

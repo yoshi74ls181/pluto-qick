@@ -12,6 +12,8 @@ set ip_recreate {
         CONFIG.PartsPresent {Phase_Generator_and_SIN_COS_LUT}
         CONFIG.Parameter_Entry {System_Parameters}
         CONFIG.DDS_Clock_Rate {122.88}
+        CONFIG.Frequency_Resolution {0.02}
+        CONFIG.Phase_Width {32}
         CONFIG.Output_Width {16}
         CONFIG.Phase_Increment {Streaming}
         CONFIG.Phase_Offset {Streaming}

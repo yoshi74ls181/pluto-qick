@@ -57,15 +57,20 @@ E200-specific.
 
 ## Next step
 
-`N_DDS=1` is verified for the phase path
-([docs/ndds1-simulation.md](docs/ndds1-simulation.md)). Remaining before
-integration:
+`N_DDS=1` is verified for the phase path, the envelope fetch, the output mux and
+complex I/Q output — see [docs/ndds1-simulation.md](docs/ndds1-simulation.md)
+and [docs/complex-output.md](docs/complex-output.md). All blocks are measured.
 
-1. Extend the simulation to cover envelope addressing (`mem_addr_o`) and the
-   output mux at `N_DDS=1`, with the regenerated 7-series DDS in the loop.
-2. Synthesize `axis_avg_buffer` — the last unmeasured block.
-3. First overlay: tProc v2 + 1 gen + 1 readout into the antsdr-pynq `template`
-   overlay insertion point.
+Remaining before an overlay:
+
+1. Extend the complex output verification to `N_DDS>1` — `Phase_Offset`
+   streaming is what carries the per-lane offsets, and it is only exercised
+   above one lane.
+2. First overlay: tProc v2 + one generator + one readout into the antsdr-pynq
+   `template` overlay insertion point, at 122.88 MHz.
+3. Software: an AD9361/libiio backend replacing `QickSoc`/`RFDC`, on branch
+   `e200-ad9361-backend` of the qick fork. Note `nsamp` is in clocks, not
+   samples, and the envelope is interleaved across `N_DDS` memories.
 
 ## Toolchain setup
 

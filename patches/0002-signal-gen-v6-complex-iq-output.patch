@@ -1,0 +1,260 @@
+Subject: [PATCH] axis_signal_gen_v6: emit complex I/Q, not a real stream
+
+ENVELOPE_TYPE="COMPLEX" does not mean complex *output*. It only selects
+whether a second BRAM holds the imaginary envelope; the datapath then
+computes cos*env_re - sin*env_im = Re[env * e^jwt] and drives an
+N_DDS*16 bus of real samples, because that is what an RFSoC RF-DAC takes.
+The two imaginary partial products are present but commented out.
+
+The AD9361 wants baseband I/Q. This restores the imaginary half of the
+complex product and carries it all the way out:
+
+  real = cos*env_re - sin*env_im      (unchanged)
+  imag = cos*env_im + sin*env_re      (restored)
+
+and widens m_axis_tdata to N_DDS*32, packed {Q,I} with I in the low half.
+
+Every imaginary stage mirrors its real counterpart register-for-register,
+including a second latency_reg for the Q side of the source mux. A depth
+mismatch would skew Q against I, which is the subtle failure mode here and
+does not show up as anything obviously broken.
+
+For src=1 (DDS) and src=2 (envelope) the Q output carries sin and the
+imaginary envelope respectively. With GEN_DDS="FALSE" there is no
+meaningful Q, so it is held at zero rather than mirroring I, which would
+otherwise look like a constant 45-degree tone.
+
+Verified in simulation at N_DDS=1 (sim/tb_iq_ssb.sv), driving a constant
+real envelope so the output should be A * e^jwt:
+
+  image rejection : 110 dB      (a real stream gives ~0)
+  |z| ripple      : 0.024%      (constant envelope -> constant magnitude,
+                                 which fails if I and Q are skewed)
+
+Cost on xc7z020 at N_DDS=1: 758 -> 1040 LUT, 1516 -> 1986 FF, 3 -> 9 DSP,
+BRAM unchanged at 8.5.
+---
+diff --git a/firmware/ip/axis_signal_gen_v6/src/axis_signal_gen_v6.v b/firmware/ip/axis_signal_gen_v6/src/axis_signal_gen_v6.v
+index e23379f..415a9b6 100644
+--- a/firmware/ip/axis_signal_gen_v6/src/axis_signal_gen_v6.v
++++ b/firmware/ip/axis_signal_gen_v6/src/axis_signal_gen_v6.v
+@@ -118,7 +118,7 @@ output               s1_axis_tready;
+ 
+ input                m_axis_tready;
+ output               m_axis_tvalid;
+-output   [N_DDS*16-1:0] m_axis_tdata;
++output   [N_DDS*32-1:0] m_axis_tdata;   // {Q,I} per lane
+ 
+ /********************/
+ /* Internal signals */
+diff --git a/firmware/ip/axis_signal_gen_v6/src/signal_gen.v b/firmware/ip/axis_signal_gen_v6/src/signal_gen.v
+index 94c83f0..d199834 100644
+--- a/firmware/ip/axis_signal_gen_v6/src/signal_gen.v
++++ b/firmware/ip/axis_signal_gen_v6/src/signal_gen.v
+@@ -48,7 +48,7 @@ input    [N_DDS*16-1:0]     mem_dout_imag_i;
+ 
+ input                       m_axis_tready_i;
+ output                      m_axis_tvalid_o;
+-output   [N_DDS*16-1:0]     m_axis_tdata_o;
++output   [N_DDS*32-1:0]     m_axis_tdata_o;   // {Q,I} per lane
+ 
+ /********************/
+ /* Internal signals */
+@@ -86,10 +86,31 @@ reg  signed [31:0]      prod_y_full_real_a_r1   [0:N_DDS-1];
+ reg  signed [31:0]      prod_y_full_real_b_r1   [0:N_DDS-1];
+ reg  signed [31:0]      prod_y_full_real_a_r2   [0:N_DDS-1];
+ reg  signed [31:0]      prod_y_full_real_b_r2   [0:N_DDS-1];
+-//wire signed [31:0]    prod_y_full_imag_a      [0:N_DDS-1];
+-//wire signed [31:0]    prod_y_full_imag_b      [0:N_DDS-1];
+-//reg  signed [31:0]    prod_y_full_imag_a_r    [0:N_DDS-1];
+-//reg  signed [31:0]    prod_y_full_imag_b_r    [0:N_DDS-1];
++// Imaginary partial products, mirroring the real chain register-for-register.
++// A depth mismatch here would skew Q against I, which is the subtle failure
++// mode for complex output, so the pipeline depths below are deliberately
++// identical to their _real_ counterparts.
++wire signed [31:0]      prod_y_full_imag_a      [0:N_DDS-1];
++wire signed [31:0]      prod_y_full_imag_b      [0:N_DDS-1];
++reg  signed [31:0]      prod_y_full_imag_a_r1   [0:N_DDS-1];
++reg  signed [31:0]      prod_y_full_imag_b_r1   [0:N_DDS-1];
++reg  signed [31:0]      prod_y_full_imag_a_r2   [0:N_DDS-1];
++reg  signed [31:0]      prod_y_full_imag_b_r2   [0:N_DDS-1];
++wire signed [31:0]      prod_y_full_imag        [0:N_DDS-1];
++wire        [15:0]      prod_y_imag             [0:N_DDS-1];
++wire        [15:0]      prod_yq                 [0:N_DDS-1];
++reg         [15:0]      prod_yq_r1              [0:N_DDS-1];
++wire        [15:0]      prod_yq_mux             [0:N_DDS-1];
++wire        [15:0]      dout_mux_q              [0:N_DDS-1];
++wire        [15:0]      dout_mux_q_la           [0:N_DDS-1];
++wire signed [15:0]      prodg_a_imag            [0:N_DDS-1];
++wire signed [31:0]      prodg_y_full_imag       [0:N_DDS-1];
++reg signed  [31:0]      prodg_y_full_imag_r1    [0:N_DDS-1];
++reg signed  [31:0]      prodg_y_full_imag_r2    [0:N_DDS-1];
++wire        [15:0]      round_q                 [0:N_DDS-1];
++reg         [15:0]      last_q_r                [0:N_DDS-1];
++wire        [15:0]      dds_q_mux               [0:N_DDS-1];
++wire        [15:0]      mem_q_mux               [0:N_DDS-1];
+ wire signed [31:0]      prod_y_full_real        [0:N_DDS-1];
+ wire        [15:0]      prod_y_real             [0:N_DDS-1];
+ wire        [15:0]      prod_y                  [0:N_DDS-1];
+@@ -279,6 +300,21 @@ genvar i;
+             .dout    (dout_mux_la[i]   )
+          );
+ 
++         // Same depth for Q, so I and Q stay aligned.
++         latency_reg
++         #(
++            .N(2),
++            .B(16)
++         )
++         dout_mux_q_latency_reg_i
++         (
++            .rstn    (rstn       ),
++            .clk     (clk        ),
++
++            .din     (dout_mux_q[i]      ),
++            .dout    (dout_mux_q_la[i]   )
++         );
++
+       /*************/
+       /* Registers */
+       /*************/
+@@ -297,6 +333,7 @@ genvar i;
+ 
+                // Product.
+                prod_y_r1            [i]   <= prod_y            [i];
++               prod_yq_r1           [i]   <= prod_yq           [i];
+             end
+          end
+          always @(posedge clk) begin
+@@ -305,6 +342,10 @@ genvar i;
+             prod_y_full_real_b_r1 [i]   <= prod_y_full_real_b     [i];
+             prod_y_full_real_a_r2 [i]   <= prod_y_full_real_a_r1  [i];
+             prod_y_full_real_b_r2 [i]   <= prod_y_full_real_b_r1  [i];
++            prod_y_full_imag_a_r1 [i]   <= prod_y_full_imag_a     [i];
++            prod_y_full_imag_b_r1 [i]   <= prod_y_full_imag_b     [i];
++            prod_y_full_imag_a_r2 [i]   <= prod_y_full_imag_a_r1  [i];
++            prod_y_full_imag_b_r2 [i]   <= prod_y_full_imag_b_r1  [i];
+          end
+       end
+ 
+@@ -316,6 +357,7 @@ genvar i;
+ 
+             // Last sample register.
+             last_r               [i]   <= 0;
++            last_q_r             [i]   <= 0;
+          end
+          else begin   
+             // Memory data.
+@@ -323,14 +365,18 @@ genvar i;
+             mem_imag_r1          [i]   <= mem_dout_imag_i      [i*16 +: 16];
+ 
+             // Last sample register.
+-            if (en_la)
+-               last_r [i]   <= round[N_DDS-1];
++            if (en_la) begin
++               last_r   [i]   <= round  [N_DDS-1];
++               last_q_r [i]   <= round_q[N_DDS-1];
++            end
+          end
+       end
+       always @(posedge clk) begin
+          // Product with gain.
+          prodg_y_full_real_r1 [i]   <= prodg_y_full_real   [i];
+          prodg_y_full_real_r2 [i]   <= prodg_y_full_real_r1[i];
++         prodg_y_full_imag_r1 [i]   <= prodg_y_full_imag   [i];
++         prodg_y_full_imag_r2 [i]   <= prodg_y_full_imag_r1[i];
+       end
+       /*****************************/
+       /* Combinatorial assignments */
+@@ -343,24 +389,42 @@ genvar i;
+          assign prod_b_real[i]         = mem_real_la[i];
+          assign prod_b_imag[i]         = mem_imag_la[i];
+ 
+-         // Partial products.
++         // Partial products. Both halves of the complex product are now kept:
++         // the real part is (cos*env_re - sin*env_im) as before, and the
++         // imaginary part is (cos*env_im + sin*env_re). Together they give
++         // env * e^jwt rather than just its real part -- which is what an
++         // AD9361 baseband I/Q interface needs, as opposed to the real stream
++         // an RFSoC RF-DAC consumes.
+          assign prod_y_full_real_a[i]  = prod_a_real[i]*prod_b_real[i];
+          assign prod_y_full_real_b[i]  = prod_a_imag[i]*prod_b_imag[i];
+-         // assign prod_y_full_imag_a[i]  = prod_a_real[i]*prod_b_imag[i];
+-         // assign prod_y_full_imag_b[i]  = prod_a_imag[i]*prod_b_real[i];
++         assign prod_y_full_imag_a[i]  = prod_a_real[i]*prod_b_imag[i];
++         assign prod_y_full_imag_b[i]  = prod_a_imag[i]*prod_b_real[i];
+ 
+          // Addition or partial products.
+          assign prod_y_full_real[i]    = prod_y_full_real_a_r2[i] - prod_y_full_real_b_r2[i];
+-         
++         assign prod_y_full_imag[i]    = prod_y_full_imag_a_r2[i] + prod_y_full_imag_b_r2[i];
++
+          // Quantization.  
+          assign prod_y_real[i]         = prod_y_full_real[i][31:16];
+          assign prod_y[i]              = prod_y_real[i];
++         assign prod_y_imag[i]         = prod_y_full_imag[i][31:16];
++         assign prod_yq[i]             = prod_y_imag[i];
+ 
+          assign prod_y_mux[i]          = prod_y_r1[i];
++         assign prod_yq_mux[i]         = prod_yq_r1[i];
++
++         // Q components of the non-product mux sources.
++         assign dds_q_mux[i]           = dds_dout_la[i][31:16];   // sin
++         assign mem_q_mux[i]           = mem_imag_la[i];
+       end
+       else begin
+          assign prod_y_mux[i]          = mem_la_mux[i] >> 1;   // divide by 2 to match product path scaling
+          assign dds_la_mux[i][15:0]    = (2**15)-1;
++         // No DDS: Q has nothing meaningful to carry, so hold it at zero
++         // rather than duplicating I, which would look like a 45 degree tone.
++         assign prod_yq_mux[i]         = 16'h0000;
++         assign dds_q_mux[i]           = 16'h0000;
++         assign mem_q_mux[i]           = 16'h0000;
+       end
+ 
+       // Muxed output.
+@@ -368,19 +432,30 @@ genvar i;
+                                     (src_la == 1)? dds_la_mux[i]  :
+                                     (src_la == 2)? mem_la_mux[i]  :
+                                     16'h0000;
++      assign dout_mux_q[i]       =  (src_la == 0)? prod_yq_mux[i] :
++                                    (src_la == 1)? dds_q_mux[i]   :
++                                    (src_la == 2)? mem_q_mux[i]   :
++                                    16'h0000;
+       // Product with Gain.
+       assign prodg_a_real[i]      = dout_mux_la[i];
+       assign prodg_y_full_real[i] = prodg_a_real[i] * gain_la;
++      assign prodg_a_imag[i]      = dout_mux_q_la[i];
++      assign prodg_y_full_imag[i] = prodg_a_imag[i] * gain_la;
+ 
+       // Rounding.
+       assign round[i]            = prodg_y_full_real_r2[i][30 -: 16];
++      assign round_q[i]          = prodg_y_full_imag_r2[i][30 -: 16];
+ 
+       /***********/
+       /* Outputs */
+       /***********/
+-      assign m_axis_tdata_o[i*16 +: 16] =  (en_la_r == 1'b1)? round[i]   : 
++      // {Q,I} per lane: I in the low 16 bits, Q in the high 16.
++      assign m_axis_tdata_o[i*32 +: 16] =  (en_la_r == 1'b1)? round[i]   : 
+                                           (stdy_la == 1'b0)? last_r[i]     :
+                                           16'h0000;
++      assign m_axis_tdata_o[i*32+16 +: 16] = (en_la_r == 1'b1)? round_q[i] :
++                                          (stdy_la == 1'b0)? last_q_r[i]   :
++                                          16'h0000;
+    end
+ endgenerate
+     
+diff --git a/firmware/ip/axis_signal_gen_v6/src/signal_gen_top.v b/firmware/ip/axis_signal_gen_v6/src/signal_gen_top.v
+index ce93040..2129aee 100644
+--- a/firmware/ip/axis_signal_gen_v6/src/signal_gen_top.v
++++ b/firmware/ip/axis_signal_gen_v6/src/signal_gen_top.v
+@@ -59,7 +59,7 @@ output               s1_axis_tready_o;
+ 
+ input                m_axis_tready_i;
+ output               m_axis_tvalid_o;
+-output   [N_DDS*16-1:0] m_axis_tdata_o;
++output   [N_DDS*32-1:0] m_axis_tdata_o;   // {Q,I} per lane
+ 
+ input   [31:0]       START_ADDR_REG;
+ input                WE_REG;
