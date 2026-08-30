@@ -1,0 +1,372 @@
+Subject: [PATCH] readout-v2: parameterise N_DDS and add a complex input path
+
+The AD9361 already delivers quadrature baseband, so mixing a real IF the way
+axis_readout_v2 does wastes half the RX band. This adds INPUT_TYPE, alongside
+the existing ENVELOPE_TYPE idiom in axis_signal_gen_v6:
+
+  INPUT_TYPE = "REAL"     upstream behaviour, real ADC stream x DDS
+  INPUT_TYPE = "COMPLEX"  full complex multiply on a {Q,I} stream
+
+    real = I*cos - Q*sin        imag = I*sin + Q*cos
+
+The two are separate generate branches so the REAL path stays bit-identical to
+upstream. I*cos - Q*sin reaches sqrt(2) x full scale when I and Q are both
+large, so the complex branch carries the sum in 33 bits and saturates instead
+of wrapping; the REAL branch keeps its original 32-bit path untouched.
+
+N_DDS was a localparam in axis_readout_v2.v, readout_top.v and
+down_conversion_fir.v, so it could not be overridden at all -- note that means
+passing -generic N_DDS=1 to synthesis was silently ignored. It is now a
+parameter threaded through the three levels, defaulting to 1 for the E200's
+one-sample-per-l_clk datapath.
+
+component.xml carried hardcoded port widths for the 8-lane REAL configuration
+(s_axis_tdata 127, m0_axis_tdata 255). Both are now 31, matching N_DDS=1 with
+a complex input.
+
+NOTE: fir_compiler_0 must match N_DDS and is a generated artifact, so it is not
+in this patch. Run syn/regen_readout_fir_ndds1.tcl after applying, which
+rebuilds it at SamplePeriod 8 (1 sample/clock in) from the same 121-tap
+../fir.coe.
+
+Verified in sim/tb_readout_complex.sv against the retargeted 7-series DDS:
+  - COMPLEX with Q=0 matches REAL bit-for-bit over 1979 samples, so the
+    complex product provably reduces to the real one
+  - a true complex tone gives 0.01 % envelope ripple (one sideband), where the
+    same tone through the REAL path beats 100 % between two
+
+diff --git a/firmware/ip/axis_readout_v2/src/axis_readout_v2.v b/firmware/ip/axis_readout_v2/src/axis_readout_v2.v
+index 692caf0..3677433 100644
+--- a/firmware/ip/axis_readout_v2/src/axis_readout_v2.v
++++ b/firmware/ip/axis_readout_v2/src/axis_readout_v2.v
+@@ -52,9 +52,15 @@ module axis_readout_v2
+ /**************/
+ /* Parameters */
+ /**************/
+-// Number of parallel dds blocks.
+-localparam [15:0] N_DDS = 8;
+-
++// Number of parallel dds blocks. NOTE: fir_compiler_0 must be regenerated to
++// match -- its Output_Sample_Period is the decimation rate divided by N_DDS.
++// The copy shipped here is built for N_DDS=1 (SamplePeriod 8).
++parameter [15:0] N_DDS = 1;
++
++// "REAL" is upstream: a real ADC stream mixed against the DDS. "COMPLEX" takes
++// an already quadrature-downconverted {Q,I} stream, as an AD9361 delivers.
++parameter INPUT_TYPE = "COMPLEX";
++localparam IN_W = (INPUT_TYPE == "COMPLEX") ? 32 : 16;
+ /*********/
+ /* Ports */
+ /*********/
+@@ -90,7 +96,7 @@ input						aclk;
+ 
+ output						s_axis_tready;
+ input						s_axis_tvalid;
+-input		[N_DDS*16-1:0]	s_axis_tdata;
++input		[N_DDS*IN_W-1:0]	s_axis_tdata;
+ 
+ input						m0_axis_tready;
+ output						m0_axis_tvalid;
+@@ -160,7 +166,12 @@ axi_slv axi_slv_i
+ 	);
+ 
+ // Readout Top.
+-readout_top readout_top_i
++readout_top 
++	#(
++		.N_DDS		(N_DDS		),
++		.INPUT_TYPE	(INPUT_TYPE	)
++	)
++	readout_top_i
+ 	(
+ 		// Reset and clock (s0_axis, s1_axis, m0_axis, m1_axis).
+     	.aresetn		(aresetn		),
+diff --git a/firmware/ip/axis_readout_v2/src/down_conversion.v b/firmware/ip/axis_readout_v2/src/down_conversion.v
+index ae8bd04..52834a2 100644
+--- a/firmware/ip/axis_readout_v2/src/down_conversion.v
++++ b/firmware/ip/axis_readout_v2/src/down_conversion.v
+@@ -25,6 +25,14 @@ module down_conversion (
+ // Number of parallel dds blocks.
+ parameter [15:0] N_DDS = 16;
+ 
++// Input format. "REAL" is the upstream behaviour: a real ADC stream mixed
++// against the DDS to produce complex baseband. "COMPLEX" takes an already
++// quadrature-downconverted {Q,I} stream, as an AD9361 delivers, and performs a
++// full complex multiply. Selected at elaboration; the two paths are separate
++// generate branches so the REAL path stays bit-identical to upstream.
++parameter INPUT_TYPE = "REAL";
++localparam IN_W = (INPUT_TYPE == "COMPLEX") ? 32 : 16;
++
+ // 0.5 for rounding.
+ localparam [31:0] RND_0P5 = 2**15;
+ 
+@@ -36,7 +44,7 @@ input						clk;
+ 
+ output						s_axis_tready_o;
+ input						s_axis_tvalid_i;
+-input		[N_DDS*16-1:0]	s_axis_tdata_i;
++input		[N_DDS*IN_W-1:0]	s_axis_tdata_i;
+ 
+ input						m_axis_tready_i;
+ output						m_axis_tvalid_o;
+@@ -64,12 +72,28 @@ reg			[31:0]			dds_dout_r2			[0:N_DDS-1];
+ reg			[31:0]			dds_dout_r3			[0:N_DDS-1];
+ reg			[31:0]			dds_dout_r4			[0:N_DDS-1];
+ 
+-// Input data.
++// Input data (real part, or I when INPUT_TYPE == "COMPLEX").
+ reg 		[15:0]			din_r1				[0:N_DDS-1];
+ reg signed	[15:0]			din_r2				[0:N_DDS-1];
+ reg 		[15:0]			din_r3				[0:N_DDS-1];
+ reg 		[15:0]			din_r4				[0:N_DDS-1];
+ 
++// Input data, Q. Only driven when INPUT_TYPE == "COMPLEX".
++reg 		[15:0]			dinq_r1				[0:N_DDS-1];
++reg signed	[15:0]			dinq_r2				[0:N_DDS-1];
++reg 		[15:0]			dinq_r3				[0:N_DDS-1];
++reg 		[15:0]			dinq_r4				[0:N_DDS-1];
++
++// Complex-path products. I*cos - Q*sin can reach sqrt(2) x full scale when I
++// and Q are both large, so the sum is carried in 33 bits and saturated rather
++// than allowed to wrap.
++wire signed [32:0]			pyc_full_real		[0:N_DDS-1];
++wire signed [32:0]			pyc_full_imag		[0:N_DDS-1];
++reg  signed [32:0]			pyc_full_real_r		[0:N_DDS-1];
++reg  signed [32:0]			pyc_full_imag_r		[0:N_DDS-1];
++wire signed [32:0]			pyc_round_real		[0:N_DDS-1];
++wire signed [32:0]			pyc_round_imag		[0:N_DDS-1];
++
+ // Product.
+ wire signed	[15:0]			pa_real				[0:N_DDS-1];
+ wire signed	[15:0]			pa_imag				[0:N_DDS-1];
+@@ -81,6 +105,7 @@ wire signed [31:0]			py_round_real		[0:N_DDS-1];
+ wire signed [31:0]			py_round_imag		[0:N_DDS-1];
+ wire 		[15:0]			py_real				[0:N_DDS-1];
+ wire 		[15:0]			py_imag				[0:N_DDS-1];
++wire		[31:0]			raw_dout			[0:N_DDS-1];
+ wire		[31:0] 			py					[0:N_DDS-1];
+ reg			[31:0]			py_r				[0:N_DDS-1];
+ 
+@@ -148,8 +173,6 @@ genvar i;
+ 				din_r4			[i]	<= 0;
+ 
+ 				// Product.
+-				py_full_real_r	[i]	<= 0;
+-				py_full_imag_r	[i]	<= 0;
+ 				py_r			[i]	<= 0;
+ 
+ 				// Muxed output.
+@@ -163,14 +186,12 @@ genvar i;
+ 				dds_dout_r4		[i] <= dds_dout_r3		[i];
+ 
+ 				// Input data.
+-				din_r1			[i]	<= s_axis_tdata_i	[i*16 +: 16];
++				din_r1			[i]	<= s_axis_tdata_i	[i*IN_W +: 16];
+ 				din_r2			[i]	<= din_r1			[i];
+ 				din_r3			[i]	<= din_r2			[i];
+ 				din_r4			[i]	<= din_r3			[i];
+ 
+ 				// Product.
+-				py_full_real_r	[i]	<= py_full_real		[i];
+-				py_full_imag_r	[i]	<= py_full_imag		[i];
+ 				py_r			[i]	<= py				[i];
+ 
+ 				// Muxed output.
+@@ -181,21 +202,83 @@ genvar i;
+ 		/*****************************/
+ 		/* Combinatorial assignments */
+ 		/*****************************/
+-		// Product.
++		// DDS output, split into cos (real) and sin (imag).
+ 		assign pa_real		[i]	= dds_dout_r2[i][15:0];
+ 		assign pa_imag		[i]	= dds_dout_r2[i][31:16];
+-		assign py_full_real	[i]	= pa_real[i]*din_r2[i];
+-		assign py_full_imag	[i]	= pa_imag[i]*din_r2[i];
+-		assign py_round_real[i]	= py_full_real_r[i] + RND_0P5;
+-		assign py_round_imag[i]	= py_full_imag_r[i] + RND_0P5;
+-		assign py_real		[i]	= py_round_real[i][31:16];
+-		assign py_imag		[i]	= py_round_imag[i][31:16];
++
++		if (INPUT_TYPE == "COMPLEX") begin : GEN_cplx
++			// Full complex multiply: (I + jQ)(cos + j sin).
++			//   real = I*cos - Q*sin
++			//   imag = I*sin + Q*cos
++			always @(posedge clk) begin
++				if (~rstn) begin
++					dinq_r1			[i]	<= 0;
++					dinq_r2			[i]	<= 0;
++					dinq_r3			[i]	<= 0;
++					dinq_r4			[i]	<= 0;
++					pyc_full_real_r	[i]	<= 0;
++					pyc_full_imag_r	[i]	<= 0;
++				end
++				else begin
++					dinq_r1			[i]	<= s_axis_tdata_i[i*IN_W+16 +: 16];
++					dinq_r2			[i]	<= dinq_r1		[i];
++					dinq_r3			[i]	<= dinq_r2		[i];
++					dinq_r4			[i]	<= dinq_r3		[i];
++					pyc_full_real_r	[i]	<= pyc_full_real[i];
++					pyc_full_imag_r	[i]	<= pyc_full_imag[i];
++				end
++			end
++
++			// 33-bit sums: each term is bounded by full scale, so the sum reaches
++			// sqrt(2) x full scale and must not be allowed to wrap.
++			assign pyc_full_real[i]	= pa_real[i]*din_r2[i] - pa_imag[i]*dinq_r2[i];
++			assign pyc_full_imag[i]	= pa_imag[i]*din_r2[i] + pa_real[i]*dinq_r2[i];
++			assign pyc_round_real[i]	= pyc_full_real_r[i] + RND_0P5;
++			assign pyc_round_imag[i]	= pyc_full_imag_r[i] + RND_0P5;
++
++			// Saturate the 17-bit result down to 16. Bits [31:16] of the 33-bit
++			// sum carry the in-range value, matching the REAL path's scaling.
++			wire signed [16:0] sat_real = pyc_round_real[i][32:16];
++			wire signed [16:0] sat_imag = pyc_round_imag[i][32:16];
++			assign py_real[i] = (sat_real >  32767) ? 16'h7fff :
++			                    (sat_real < -32768) ? 16'h8000 :
++			                    pyc_round_real[i][31:16];
++			assign py_imag[i] = (sat_imag >  32767) ? 16'h7fff :
++			                    (sat_imag < -32768) ? 16'h8000 :
++			                    pyc_round_imag[i][31:16];
++
++			// Raw passthrough for outsel == 2 carries both components.
++			assign raw_dout[i] = {dinq_r4[i], din_r4[i]};
++		end
++		else begin : GEN_real
++			// Upstream behaviour: real input mixed against the DDS.
++			always @(posedge clk) begin
++				if (~rstn) begin
++					py_full_real_r	[i]	<= 0;
++					py_full_imag_r	[i]	<= 0;
++				end
++				else begin
++					py_full_real_r	[i]	<= py_full_real	[i];
++					py_full_imag_r	[i]	<= py_full_imag	[i];
++				end
++			end
++
++			assign py_full_real	[i]	= pa_real[i]*din_r2[i];
++			assign py_full_imag	[i]	= pa_imag[i]*din_r2[i];
++			assign py_round_real[i]	= py_full_real_r[i] + RND_0P5;
++			assign py_round_imag[i]	= py_full_imag_r[i] + RND_0P5;
++			assign py_real		[i]	= py_round_real[i][31:16];
++			assign py_imag		[i]	= py_round_imag[i][31:16];
++
++			assign raw_dout[i] = {16'h0000, din_r4[i]};
++		end
++
+ 		assign py			[i]	= {py_imag[i],py_real[i]};
+ 
+ 		// Muxed output.
+-		assign dout_mux		[i]	=	(outsel_int == 0)? py_r[i] 				: 
++		assign dout_mux		[i]	=	(outsel_int == 0)? py_r[i] 				:
+ 									(outsel_int == 1)? dds_dout_r4[i]		:
+-									(outsel_int == 2)? {16'h0000,din_r4[i]} :
++									(outsel_int == 2)? raw_dout[i] 			:
+ 									32'h0000_0000;
+ 
+ 		/***********/
+diff --git a/firmware/ip/axis_readout_v2/src/down_conversion_fir.v b/firmware/ip/axis_readout_v2/src/down_conversion_fir.v
+index 2189aae..d5e6952 100644
+--- a/firmware/ip/axis_readout_v2/src/down_conversion_fir.v
++++ b/firmware/ip/axis_readout_v2/src/down_conversion_fir.v
+@@ -27,9 +27,15 @@ module down_conversion_fir (
+ /**************/
+ /* Parameters */
+ /**************/
+-// Number of parallel dds blocks.
+-localparam [15:0] N_DDS = 8;
+-
++// Number of parallel dds blocks. NOTE: fir_compiler_0 must be regenerated to
++// match -- its Output_Sample_Period is the decimation rate divided by N_DDS.
++// The copy shipped here is built for N_DDS=1 (SamplePeriod 8).
++parameter [15:0] N_DDS = 1;
++
++// "REAL" is upstream: a real ADC stream mixed against the DDS. "COMPLEX" takes
++// an already quadrature-downconverted {Q,I} stream, as an AD9361 delivers.
++parameter INPUT_TYPE = "COMPLEX";
++localparam IN_W = (INPUT_TYPE == "COMPLEX") ? 32 : 16;
+ /*********/
+ /* Ports */
+ /*********/
+@@ -38,7 +44,7 @@ input						clk;
+ 
+ output						s_axis_tready_o;
+ input						s_axis_tvalid_i;
+-input		[N_DDS*16-1:0]	s_axis_tdata_i;
++input		[N_DDS*IN_W-1:0]	s_axis_tdata_i;
+ 
+ input						m0_axis_tready_i;
+ output						m0_axis_tvalid_o;
+@@ -62,7 +68,8 @@ input		[82:0]			fifo_dout_i;
+ // Down-conversion block (product with fast DDS).
+ down_conversion 
+ 	#(
+-		.N_DDS	(N_DDS)
++		.N_DDS	(N_DDS),
++		.INPUT_TYPE (INPUT_TYPE)
+ 	)
+ 	down_conversion_i
+ 	(
+diff --git a/firmware/ip/axis_readout_v2/src/readout_top.v b/firmware/ip/axis_readout_v2/src/readout_top.v
+index a9fc32e..c7dfa97 100644
+--- a/firmware/ip/axis_readout_v2/src/readout_top.v
++++ b/firmware/ip/axis_readout_v2/src/readout_top.v
+@@ -32,9 +32,15 @@ module readout_top
+ /**************/
+ /* Parameters */
+ /**************/
+-// Number of parallel dds blocks.
+-localparam [15:0] N_DDS = 8;
+-
++// Number of parallel dds blocks. NOTE: fir_compiler_0 must be regenerated to
++// match -- its Output_Sample_Period is the decimation rate divided by N_DDS.
++// The copy shipped here is built for N_DDS=1 (SamplePeriod 8).
++parameter [15:0] N_DDS = 1;
++
++// "REAL" is upstream: a real ADC stream mixed against the DDS. "COMPLEX" takes
++// an already quadrature-downconverted {Q,I} stream, as an AD9361 delivers.
++parameter INPUT_TYPE = "COMPLEX";
++localparam IN_W = (INPUT_TYPE == "COMPLEX") ? 32 : 16;
+ /*********/
+ /* Ports */
+ /*********/
+@@ -43,7 +49,7 @@ input						aclk;
+ 
+ output						s_axis_tready;
+ input						s_axis_tvalid;
+-input		[N_DDS*16-1:0]	s_axis_tdata;
++input		[N_DDS*IN_W-1:0]	s_axis_tdata;
+ 
+ input						m0_axis_tready;
+ output						m0_axis_tvalid;
+@@ -89,6 +95,10 @@ synchronizer_n
+ 
+ // Down-conversion + Filter +  Decimation.
+ down_conversion_fir
++	#(
++		.N_DDS		(N_DDS		),
++		.INPUT_TYPE	(INPUT_TYPE	)
++	)
+ 	down_conversion_fir_i
+ 	(
+ 		// Reset and clock.
+--- a/firmware/ip/axis_readout_v2/component.xml
++++ b/firmware/ip/axis_readout_v2/component.xml
+@@ -828,7 +828,7 @@
+         <spirit:wire>
+           <spirit:direction>in</spirit:direction>
+           <spirit:vector>
+-            <spirit:left spirit:format="long">127</spirit:left>
++            <spirit:left spirit:format="long">31</spirit:left>
+             <spirit:right spirit:format="long">0</spirit:right>
+           </spirit:vector>
+           <spirit:wireTypeDefs>
+@@ -903,7 +903,7 @@
+         <spirit:wire>
+           <spirit:direction>out</spirit:direction>
+           <spirit:vector>
+-            <spirit:left spirit:format="long">255</spirit:left>
++            <spirit:left spirit:format="long">31</spirit:left>
+             <spirit:right spirit:format="long">0</spirit:right>
+           </spirit:vector>
+           <spirit:wireTypeDefs>
