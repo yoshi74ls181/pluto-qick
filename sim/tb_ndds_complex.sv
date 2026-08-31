@@ -10,8 +10,14 @@
 //
 // and we require the N_DDS=1 build to produce the same sample stream as N_DDS=4.
 //
-// Note this verifies the *existing* real-output datapath under a complex
-// envelope. It does not make the output complex -- see docs/complex-output.md.
+// Note this verifies the real-output datapath under a complex envelope; it is
+// not a test of the complex output itself -- see docs/complex-output.md.
+//
+// Updated for patch 0002: m_axis now carries 32 bits per lane as {Q,I}, so the
+// comparison takes the real half of each lane. Before this fix the testbench
+// still sliced 16 bits per lane and so read lane 0's Q as if it were lane 1's
+// I, reporting ~91 of 112 samples mismatched -- a stale-testbench artifact, not
+// a datapath defect.
 `timescale 1ns / 1ps
 
 module tb_ndds_complex();
@@ -45,7 +51,8 @@ function automatic [159:0] descr(input [15:0] nsamp);
 endfunction
 
 // ------------------------------------------------------------------- ref DUT
-wire [NREF*16-1:0] tdata_ref;  wire tvalid_ref;
+// 32 bits per lane, {Q,I}: patch 0002 made the generator output complex.
+wire [NREF*32-1:0] tdata_ref;  wire tvalid_ref;
 wire [N-1:0]       maddr_ref;
 wire               rd_ref, empty_ref;
 reg                wr_ref = 0;  reg [159:0] din_ref;
@@ -70,7 +77,7 @@ always @(posedge clk)
    end
 
 // ------------------------------------------------------------------ cand DUT
-wire [15:0]  tdata_cnd;  wire tvalid_cnd;
+wire [31:0]  tdata_cnd;  wire tvalid_cnd;
 wire [N-1:0] maddr_cnd;
 wire         rd_cnd, empty_cnd;
 reg          wr_cnd = 0;  reg [159:0] din_cnd;
@@ -96,8 +103,8 @@ end
 bit [15:0] o_ref [$];  bit [15:0] o_cnd [$];
 
 always @(posedge clk) if (rstn) begin
-   if (tvalid_ref) for (int i = 0; i < NREF; i++) o_ref.push_back(tdata_ref[i*16 +: 16]);
-   if (tvalid_cnd) o_cnd.push_back(tdata_cnd);
+   if (tvalid_ref) for (int i = 0; i < NREF; i++) o_ref.push_back(tdata_ref[i*32 +: 16]);   // real part of lane i
+   if (tvalid_cnd) o_cnd.push_back(tdata_cnd[15:0]);         // real part
 end
 
 initial begin

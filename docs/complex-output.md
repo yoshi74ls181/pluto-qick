@@ -119,3 +119,51 @@ hardcode the resolution.**
 One measurement not chased: the worst spur sits ~43 dB below carrier regardless
 of whether SFDR is 45 or 96, so it is not the DDS. Most likely Hanning leakage
 in the analysis rather than a real spur, but it was not investigated.
+
+## The Q mux sources needed the same latency as I (patch 0007)
+
+Patch 0002 added Q components for the non-product mux sources by mirroring the
+shape of the existing I assignments:
+
+    assign dds_q_mux[i] = dds_dout_la[i][31:16];   // sin
+    assign mem_q_mux[i] = mem_imag_la[i];
+
+That mirroring was wrong, because the I sources do not reach the mux directly:
+`dds_la_mux` and `mem_la_mux` each pass through a 3-cycle `latency_reg`. Q
+therefore arrived three cycles early, giving `I = cos(theta-3)` against
+`Q = sin(theta)` -- a pair that is no longer in quadrature, so the magnitude is
+not constant.
+
+On a DDS-only pulse at full gain, where the envelope should be perfectly flat:
+
+    before:  |out| range [15760, 43560]   ripple 63.8 %
+    after:   |out| range [32764, 32766]   ripple  0.01 %
+
+Two things make this worth dwelling on:
+
+* `outsel=1` (DDS only) is what QICK selects for `style='const'`, the simplest
+  pulse and the first thing a bring-up tries. A 2.8x envelope swing there would
+  very plausibly have been read as an analog gain or compression problem.
+* The product path (`outsel=0`) was unaffected, which is exactly why the original
+  complex-output verification missed it -- `tb_ndds_complex.sv` and
+  `tb_iq_ssb.sv` both exercise envelope x DDS, never the DDS source alone. The
+  lesson is that adding a source to a mux means checking *every* selector value,
+  not just the one the interesting datapath uses.
+
+`sim/tb_sg_chain.sv` covers it now, by driving a tProc v2 descriptor through
+`sg_translator` into the generator and measuring the pulse that results.
+
+## A stale testbench, not a stale datapath
+
+`tb_ndds_complex.sv` was written before patch 0002 and still sliced 16 bits per
+lane out of `m_axis`, which after that patch carries 32 bits per lane as {Q,I}.
+It was therefore reading lane 0's Q as if it were lane 1's I and reporting ~91 of
+112 samples mismatched. Fixing the slicing brings that to:
+
+    PINC 1048576 (2^20, divides evenly) : PASS within 4 LSB
+    PINC 8000000 (does not divide)      : 3 of 112 samples exceed 4 LSB
+
+which is the base-phase rounding difference between the N_DDS=1 and N_DDS=4
+paths that this testbench exists to probe, showing up exactly where the
+truncation argument predicts. The tolerance has deliberately not been loosened
+to turn that into a pass.

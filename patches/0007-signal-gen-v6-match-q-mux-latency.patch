@@ -1,0 +1,105 @@
+Subject: [PATCH] signal-gen-v6: delay the Q mux sources to match I
+
+Completes patch 0002. That patch added Q components for the non-product mux
+sources:
+
+    assign dds_q_mux[i] = dds_dout_la[i][31:16];   // sin
+    assign mem_q_mux[i] = mem_imag_la[i];
+
+mirroring the shape of the existing I assignments -- but the I sources do not
+reach the mux directly. dds_la_mux and mem_la_mux each pass through a 3-cycle
+latency_reg (dds_mux_latency_reg_i, mem_mux_latency_reg_i). So Q arrived three
+cycles ahead of I, giving I = cos(theta-3) against Q = sin(theta), whose
+magnitude is not constant.
+
+The effect is large and easy to mistake for an analog fault. On a DDS-only pulse
+at full gain the envelope should be flat; measured instead:
+
+    |out| range [15760, 43560], ripple 63.8 %
+
+and after adding matching latency registers:
+
+    |out| range [32764, 32766], ripple 0.01 %
+
+This matters more than it might appear, because outsel=1 (DDS only) is the mode
+QICK selects for style='const' -- the simplest possible pulse, and the one a
+first bring-up reaches for. The product path (outsel=0) was unaffected, which is
+why the earlier complex-output verification did not catch it: that work
+exercised envelope x DDS, never the DDS source on its own.
+
+Found by sim/tb_sg_chain.sv, which drives a tProc v2 descriptor through
+sg_translator into the generator and measures the resulting pulse.
+
+--- a/firmware/ip/axis_signal_gen_v6/src/signal_gen.v
++++ b/firmware/ip/axis_signal_gen_v6/src/signal_gen.v
+@@ -111,6 +111,11 @@
+ reg         [15:0]      last_q_r                [0:N_DDS-1];
+ wire        [15:0]      dds_q_mux               [0:N_DDS-1];
+ wire        [15:0]      mem_q_mux               [0:N_DDS-1];
++// Undelayed Q sources. The matching I sources (dds_la_mux, mem_la_mux) each
++// pass through a 3-cycle mux latency_reg, so Q must too or the pair stops
++// being in quadrature.
++wire        [15:0]      dds_q_pre               [0:N_DDS-1];
++wire        [15:0]      mem_q_pre               [0:N_DDS-1];
+ wire signed [31:0]      prod_y_full_real        [0:N_DDS-1];
+ wire        [15:0]      prod_y_real             [0:N_DDS-1];
+ wire        [15:0]      prod_y                  [0:N_DDS-1];
+@@ -285,6 +290,36 @@
+             .dout    (mem_la_mux[i]    )
+          );
+ 
++      // Match the I-side mux latency so the pair stays in quadrature.
++      latency_reg
++         #(
++            .N(3),
++            .B(16)
++         )
++         dds_q_mux_latency_reg_i
++         (
++            .rstn    (rstn          ),
++            .clk     (clk           ),
++      
++            .din     (dds_q_pre[i]  ),
++            .dout    (dds_q_mux[i]  )
++         );
++
++      // Match the I-side mux latency so the pair stays in quadrature.
++      latency_reg
++         #(
++            .N(3),
++            .B(16)
++         )
++         mem_q_mux_latency_reg_i
++         (
++            .rstn    (rstn          ),
++            .clk     (clk           ),
++      
++            .din     (mem_q_pre[i]  ),
++            .dout    (mem_q_mux[i]  )
++         );
++
+       // Latency dout_mux (envelope x dds).
+       latency_reg
+          #(
+@@ -414,8 +449,8 @@
+          assign prod_yq_mux[i]         = prod_yq_r1[i];
+ 
+          // Q components of the non-product mux sources.
+-         assign dds_q_mux[i]           = dds_dout_la[i][31:16];   // sin
+-         assign mem_q_mux[i]           = mem_imag_la[i];
++         assign dds_q_pre[i]            = dds_dout_la[i][31:16];   // sin
++         assign mem_q_pre[i]            = mem_imag_la[i];
+       end
+       else begin
+          assign prod_y_mux[i]          = mem_la_mux[i] >> 1;   // divide by 2 to match product path scaling
+@@ -423,8 +458,8 @@
+          // No DDS: Q has nothing meaningful to carry, so hold it at zero
+          // rather than duplicating I, which would look like a 45 degree tone.
+          assign prod_yq_mux[i]         = 16'h0000;
+-         assign dds_q_mux[i]           = 16'h0000;
+-         assign mem_q_mux[i]           = 16'h0000;
++         assign dds_q_pre[i]            = 16'h0000;
++         assign mem_q_pre[i]            = 16'h0000;
+       end
+ 
+       // Muxed output.
