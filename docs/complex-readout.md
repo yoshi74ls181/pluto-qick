@@ -104,3 +104,37 @@ Sample rate is read back from the AD9361 rather than assumed: reprogramming the
 PL resets `axi_ad9361` and the driver re-establishes the rate. It moved from
 30.72 to 15.36 MHz across a load here, so a value captured beforehand would
 have described the wrong hardware.
+
+## The regenerated FIR, verified in simulation
+
+`syn/regen_readout_fir_ndds1.tcl` rebuilds `fir_compiler_0` at `SamplePeriod 8`,
+and that filter was the one part of this change existing only as a generated
+artifact -- nothing checked that the regeneration preserved either the rate
+change or the response. `sim/tb_fir_decim.sv` now does, driving the whole
+`down_conversion_fir` (complex mixer plus filter) at `N_DDS=1`:
+
+    vivado -mode batch -source sim/run_sim_fir.tcl
+
+    Decimation cadence
+      m1_axis_tvalid asserted 100 times in 800 clocks
+      gap between valids: min 8, max 8      -> decimate-by-8, one sample/clock
+
+    Filter response (input amplitude 20000)
+      f = fs/512  (deep passband) : 10253.1
+      f = fs/64   (passband)      : 10112.3
+      f = 3fs/16  (stopband)      :     3.2   -> 70.2 dB rejection
+
+The cadence check matters because a wrong `SamplePeriod` is the failure mode that
+would look plausible: the filter would still decimate by 8, but consume eight
+samples per clock instead of one, so the rate would appear right while the data
+was wrong. Checking the gap between valids catches that directly.
+
+The response check uses `outsel = 2` (raw input passthrough) so the DDS does not
+move the tone away from the frequency under test. Passband gain is about 0.51 of
+the input, which is the same product scaling the mixer testbench sees.
+
+Two notes for anyone re-running it: the `.xci` files were customised for
+`xczu49dr`, so `import_ip` lands them locked and `upgrade_ip` is needed to
+retarget; and `fir.coe` must be staged beside the imported IP *before*
+`generate_target`, or generation fails with "Invalid COE File - Unable to open
+the file".
