@@ -1,7 +1,17 @@
 #!/bin/bash
-# One command to take a freshly power-cycled E200 through to a loopback capture.
+# Bring up a freshly power-cycled E200.
 #
-#   tools/bringup_e200.sh [ssh-host]
+#   tools/bringup_e200.sh [ssh-host]                 verify only (default)
+#   tools/bringup_e200.sh [ssh-host] --run-loopback  also load the overlay and
+#                                                    run the capture
+#
+# Verification is the default deliberately. Programming the PL is what hung the
+# board last time, hard enough that magic SysRq over serial got no response and
+# only a power cycle recovered it. quiesce_axi_masters() is meant to prevent the
+# AXI lockup that caused it, but that fix has never been exercised on hardware.
+# If power-cycling is not available, a repeat leaves the board unrecoverable
+# rather than merely inconvenient -- so loading the overlay has to be an explicit
+# choice, not something a convenience script does on its own.
 #
 # Encodes the sequence and the several traps found the hard way:
 #
@@ -19,13 +29,24 @@
 set -uo pipefail
 
 HOST=${1:-e200}
+RUN_LOOPBACK=no
+for a in "$@"; do [ "$a" = "--run-loopback" ] && RUN_LOOPBACK=yes; done
 DEST=/home/xilinx/qick_e200
 PW=${E200_SUDO_PASS:-xilinx}
 here=$(cd "$(dirname "$0")/.." && pwd)
 
 say() { printf '\n== %s\n' "$*"; }
 
-say "1. radio state before touching anything"
+say "1. boot source -- confirm it came up on PYNQ from SD, not QSPI firmware"
+timeout 30 ssh -o BatchMode=yes "$HOST" 'bash -lc "
+echo \"   kernel   = \$(uname -r)\"
+echo \"   board    = \$BOARD\"
+echo \"   rootfs   = \$(findmnt -no SOURCE / 2>/dev/null)\"
+echo \"   pynq     = \$(python3 -c \"import pynq;print(pynq.__version__)\" 2>/dev/null || echo absent)\"
+echo \"   overlay  = \$(cat /sys/firmware/devicetree/base/chosen/pynq_board 2>/dev/null | tr -d \\\\0)\"
+"' || { echo "   board not reachable" >&2; exit 1; }
+
+say "2. radio state before touching anything"
 timeout 30 ssh -o BatchMode=yes "$HOST" 'bash -lc "
 for d in /sys/bus/iio/devices/iio:device*; do
   n=\$(cat \$d/name 2>/dev/null)
@@ -35,15 +56,27 @@ done
 echo \"   uptime = \$(cut -d. -f1 /proc/uptime)s\"
 "' || { echo "   board not reachable" >&2; exit 1; }
 
-say "2. deploy bitstream, patched qick lib, notebooks"
+if [ "$RUN_LOOPBACK" != yes ]; then
+    cat <<'MSG'
+
+== verification only; stopping here.
+   Nothing has been deployed and the PL has NOT been reprogrammed.
+   To go further:  tools/bringup_e200.sh <host> --run-loopback
+   Be aware that programming the PL is what hung the board previously, and the
+   fix for that has not yet been exercised on hardware.
+MSG
+    exit 0
+fi
+
+say "3. deploy bitstream, patched qick lib, notebooks"
 E200_SUDO_PASS="$PW" "$here/tools/deploy_e200.sh" "$HOST" 2>&1 | grep -E '==>|cache|error' || true
 
-say "3. smoke test: load the overlay and report discovery"
+say "4. smoke test: load the overlay and report discovery"
 timeout 300 ssh -o BatchMode=yes "$HOST" \
   "echo '$PW' | sudo -S -p '' bash -lc 'cd $DEST && timeout 240 python3 -u -W ignore smoke_e200.py'" 2>&1 \
   | grep -vE '^\[sudo' | grep -E 'LOADED|memories|generators|readouts|avg buffers|gen\[|ro\[|tproc |tx source|reset default|after set|restored|SMOKE_OK|Error|Traceback' || true
 
-say "4. loopback acquire, detached so a dropped link cannot lose the log"
+say "5. loopback acquire, detached so a dropped link cannot lose the log"
 timeout 60 ssh -o BatchMode=yes "$HOST" "cat > $DEST/run_acq.sh <<'EOS'
 #!/bin/bash
 cd $DEST
@@ -65,6 +98,6 @@ for i in $(seq 1 60); do
   sleep 10
 done
 
-say "5. result"
+say "6. result"
 timeout 40 ssh -o BatchMode=yes "$HOST" "cat $DEST/acq.log 2>/dev/null" \
   | grep -vE 'Exception ignored|iio.py|^TypeError|Traceback \(most recent call last\)' || echo "   no log retrieved"
