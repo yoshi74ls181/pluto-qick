@@ -41,7 +41,8 @@ function automatic [159:0] descr(input [15:0] nsamp, input [1:0] outsel);
 endfunction
 
 // ------------------------------------------------------------------- ref DUT
-wire [NREF*16-1:0] tdata_ref;  wire tvalid_ref;
+// 32 bits per lane, {Q,I}: patch 0002 made the generator output complex.
+wire [NREF*32-1:0] tdata_ref;  wire tvalid_ref;
 wire [N-1:0]       maddr_ref;
 wire               rd_ref, empty_ref;
 reg                wr_ref = 0;  reg [159:0] din_ref;
@@ -68,7 +69,7 @@ always @(posedge clk) begin
 end
 
 // ------------------------------------------------------------------ cand DUT
-wire [15:0]  tdata_cnd;  wire tvalid_cnd;
+wire [31:0]  tdata_cnd;  wire tvalid_cnd;
 wire [N-1:0] maddr_cnd;
 wire         rd_cnd, empty_cnd;
 reg          wr_cnd = 0;  reg [159:0] din_cnd;
@@ -96,11 +97,11 @@ bit [31:0] a_ref [$];  bit [31:0] a_cnd [$];
 
 always @(posedge clk) if (rstn) begin
    if (tvalid_ref) begin
-      for (int i = 0; i < NREF; i++) o_ref.push_back(tdata_ref[i*16 +: 16]);
+      for (int i = 0; i < NREF; i++) o_ref.push_back(tdata_ref[i*32 +: 16]);   // real part of lane i
       a_ref.push_back(maddr_ref);
    end
    if (tvalid_cnd) begin
-      o_cnd.push_back(tdata_cnd);
+      o_cnd.push_back(tdata_cnd[15:0]);         // real part
       a_cnd.push_back(maddr_cnd);
    end
 end
