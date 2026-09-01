@@ -11,7 +11,29 @@ so it terminates only when the tProc completes a shot. Three things could stop
 that, and it is worth recording which one it was, because two of them were
 plausible enough to chase.
 
-## The cause: the cores were never enabled
+## Correction: this document was written before the cause was fully understood
+
+The section below is right that the cores were not enabled, but the fix it
+describes -- issuing `TIME_UPDATE` and `CORE_START` -- turned out not to be
+sufficient, and the reason is worth recording.
+
+`acquire()` calls `clear_tproc_counter()` immediately before starting, which on
+tProc v2 means `PROCESSOR_RESET`. After a reset this firmware responds only to
+`PROCESSOR_RUN`; `time_reset`, `time_update`, `core_start` and `start` all leave
+the status register untouched. Worse, the handshake **swallows the first control
+write after a reset**, and whether any given write takes is timing dependent: the
+same sequence that brought both cores up in one run left `Core_EN=0` in the next.
+
+So `QickSocE200.start_tproc()` now issues `run()`, pauses, delegates upward, and
+then **verifies** the status, retrying up to twelve times and raising with the
+register value if the cores never come up. Issuing commands blind is not reliable
+on this build.
+
+A second, entirely separate cause was hiding behind the first: even with the
+cores running, nothing was transmitted, because the AD9361 only forwards fabric
+data when its transmit channel is in DMA mode. See `loopback.md`.
+
+## The original diagnosis: the cores were never enabled
 
 `QickSoc.start_tproc()` issues only `PROCESSOR_START` (`tproc_ctrl` bit 2). After
 a program is loaded, the status register reported:

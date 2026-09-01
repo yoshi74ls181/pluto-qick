@@ -15,11 +15,19 @@
 //   1. With sel=0 the module is a wire. Data and valid must appear at the
 //      outputs in the SAME cycle they appear at the inputs -- any pipelining
 //      here reintroduces the skew.
-//   2. With sel=1 the generator's samples are presented, valid is held, and
-//      tready pulses exactly when the FIFO requests a sample, so the generator
-//      advances in lockstep with real consumption.
-//   3. tready is never asserted while sel=0, or the generator would advance
-//      (and drop samples) while the stock path is in use.
+//   2. With sel=1 the generator's samples are presented and valid is held.
+//   3. tready follows sel and nothing else. It must be asserted whenever the
+//      generator is selected, and never when it is not.
+//
+// Property 3 used to read the other way round: tready was gated on the fifo's
+// read request, on the reasoning that the generator should advance in lockstep
+// with real consumption. On hardware that deadlocked. With the stock transmit
+// path idle the fifo never requests a sample, so the generator could not
+// advance, which back-pressured sg_translator and stalled the tProc on the
+// instruction that writes the waveform descriptor -- a capture that blocked
+// outright rather than merely dropping samples. Both sides run on the same
+// divided clock at one complex sample per clock, so they are rate matched
+// anyway and the handshake bought nothing.
 //
 module tb_tx_mux;
 
@@ -27,7 +35,7 @@ localparam integer NCHK = 400;
 
 reg         clk = 0, resetn = 0, sel = 0;
 reg  [15:0] dma_data_i = 0, dma_data_q = 0;
-reg         dma_valid_in = 0, dma_rd_en = 0;
+reg         dma_valid_in = 0;
 reg  [31:0] qick_tdata = 0;
 reg         qick_tvalid = 1;
 wire        qick_tready;
@@ -39,7 +47,7 @@ always #4 clk = ~clk;     // 125 MHz, the worst-case divided AD9361 clock
 qick_tx_mux dut (
     .clk(clk), .resetn(resetn), .sel(sel),
     .dma_data_i(dma_data_i), .dma_data_q(dma_data_q),
-    .dma_valid_in(dma_valid_in), .dma_rd_en(dma_rd_en),
+    .dma_valid_in(dma_valid_in),
     .qick_tdata(qick_tdata), .qick_tvalid(qick_tvalid), .qick_tready(qick_tready),
     .dac_data_i(dac_data_i), .dac_data_q(dac_data_q), .dac_valid_in(dac_valid_in));
 
@@ -69,7 +77,6 @@ begin
     dma_data_i   = $random;
     dma_data_q   = $random;
     dma_valid_in = k[0];
-    dma_rd_en    = k[1];
     qick_tdata   = {$random} & 32'hffff_ffff;
     #1;   // settle combinational logic, still between edges
     if (sel === 1'b0) begin
@@ -81,10 +88,10 @@ begin
         if (dac_data_i   !== qick_tdata[15:0])  fail("sel=1 data_i wrong");
         if (dac_data_q   !== qick_tdata[31:16]) fail("sel=1 data_q wrong");
         if (dac_valid_in !== 1'b1)              fail("sel=1 valid not held");
-        if (qick_tready  !== dma_rd_en)         fail("tready != fifo request");
-        if (dma_rd_en) ready_cnt = ready_cnt + 1;
+        if (qick_tready  !== 1'b1)              fail("tready not held while selected");
+        ready_cnt = ready_cnt + 1;
     end
-    if (sel === 1'b1 && dma_rd_en) rd_cnt = rd_cnt + 1;
+    if (sel === 1'b1) rd_cnt = rd_cnt + 1;
 end
 endtask
 
@@ -100,12 +107,12 @@ initial begin
     $display("  %0d cycles checked, errors so far = %0d", NCHK, errs);
 
     $display("");
-    $display("Phase 2  sel=1 must present generator samples and pull in step");
+    $display("Phase 2  sel=1 must present generator samples and hold tready");
     sel = 1; repeat (4) @(posedge clk);
     for (n = 0; n < NCHK; n = n + 1) step(n);
-    $display("  %0d cycles checked, tready pulses = %0d, fifo requests = %0d",
+    $display("  %0d cycles checked, tready asserted on %0d of %0d",
              NCHK, ready_cnt, rd_cnt);
-    if (ready_cnt != rd_cnt) fail("tready count != request count");
+    if (ready_cnt != rd_cnt) fail("tready not asserted on every selected cycle");
 
     $display("");
     $display("Phase 3  switching back must restore the wire immediately");
@@ -114,7 +121,7 @@ initial begin
 
     $display("");
     if (errs == 0)
-        $display("PASS  sel=0 is bit-exact and zero-latency; sel=1 pulls in lockstep");
+        $display("PASS  sel=0 is bit-exact and zero-latency; sel=1 holds tready");
     else
         $display("FAIL  %0d errors", errs);
     $display("");
