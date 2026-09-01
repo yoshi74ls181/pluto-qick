@@ -31,6 +31,17 @@ sdr.rx_hardwaregain_chan0 = 20.0
 sdr.tx_hardwaregain_chan0 = -20.0
 print("  radio:", sdr._ctrl.attrs['ensm_mode'].value, " fs =", soc['refclk_freq'], "MHz")
 
+# The AD9361 only forwards fabric data when its transmit channel is in DMA mode,
+# which needs an active ADI transmit buffer. Without this the converter ignores
+# the generator entirely and the capture reads zero -- with everything upstream
+# looking correct, which is what made it hard to find. A cyclic buffer of zeros
+# puts the channel in the right mode and contributes no signal of its own; the
+# mux replaces its data anyway. It must be started BEFORE the mux is switched.
+sdr.tx_cyclic_buffer = True
+sdr.tx(np.zeros(4096, dtype=np.complex64))
+time.sleep(0.5)
+print("  ADI transmit path in DMA mode (cyclic zeros)")
+
 soc.tx_source('qick')
 print("  tx source:", soc.get_tx_source())
 
@@ -82,6 +93,10 @@ if len(seg) >= 8:
 print("  first 6 |IQ|:", np.round(mag[:6], 1), " ... last 6:", np.round(mag[-6:], 1))
 
 soc.tx_source('dma')
+try:
+    sdr.tx_destroy_buffer()
+except Exception:
+    pass
 sdr.tx_hardwaregain_chan0 = -89.75
 print("  restored: tx source", soc.get_tx_source())
 print("ACQ_DONE")
