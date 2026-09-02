@@ -11,7 +11,6 @@ set -uo pipefail
 
 here=$(cd "$(dirname "$0")/.." && pwd)
 export QICK_ROOT=${QICK_ROOT:-$here/third_party/qick}
-MUX=${MUX_V:-$here/../antsdr-pynq/boards/e200/qick/antsdre200/qick_tx_mux.v}
 LOGDIR=$here/build/sims; mkdir -p "$LOGDIR"
 
 # shellcheck disable=SC1091
@@ -39,8 +38,6 @@ run_xsim() {                       # name, top, sources...
     else                                               record "$name" "no verdict"
     fi
 }
-
-run_xsim tb_tx_mux tb_tx_mux "$MUX" "$here/sim/tb_tx_mux.sv"
 
 SG=$QICK_ROOT/firmware/ip/axis_signal_gen_v6/src
 HDL=$QICK_ROOT/firmware/hdl

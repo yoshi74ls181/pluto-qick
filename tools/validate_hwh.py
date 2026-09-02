@@ -24,7 +24,7 @@ class FakeSoc:
 md = QickMetadata(FakeSoc(ET.parse(HWH).getroot()))
 
 qick_blocks = [k for k in md.modinfo if any(t in k for t in
-    ('qick_processor_0','sg0','sgt0','ro0','avg0','axi_dma','qick_tx_mux','qick_gpio','qick_avg2tproc','qick_adc_cat'))]
+    ('qick_processor_0','sg0','sgt0','ro0','avg0','axi_dma','qick_avg2tproc','qick_adc_cat'))]
 print("QICK blocks found in the hwh:")
 for b in sorted(qick_blocks):
     print("   %-22s %s" % (b, md.mod2type(b)))

@@ -42,8 +42,6 @@ sdr.tx(np.zeros(4096, dtype=np.complex64))
 time.sleep(0.5)
 print("  ADI transmit path in DMA mode (cyclic zeros)")
 
-soc.tx_source('qick')
-print("  tx source:", soc.get_tx_source())
 
 
 class Loopback(AveragerProgramV2):
@@ -92,11 +90,9 @@ if len(seg) >= 8:
              slope * 1e3))
 print("  first 6 |IQ|:", np.round(mag[:6], 1), " ... last 6:", np.round(mag[-6:], 1))
 
-soc.tx_source('dma')
 try:
     sdr.tx_destroy_buffer()
 except Exception:
     pass
 sdr.tx_hardwaregain_chan0 = -89.75
-print("  restored: tx source", soc.get_tx_source())
 print("ACQ_DONE")

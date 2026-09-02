@@ -19,7 +19,6 @@ sdr.tx_hardwaregain_chan0 = -20.0
 sdr.tx_cyclic_buffer = True
 sdr.tx(np.zeros(4096, dtype=np.complex64))
 time.sleep(0.5)
-soc.tx_source('qick')
 
 PULSE_US, RO_US, FREQ = 10.0, 30.0, 1.0
 
@@ -71,7 +70,6 @@ if len(amp) >= 2:
     p("  amplitude vs commanded gain: %s" % np.round(ratio, 3))
     p("  (1.000 everywhere means the response is linear in gain)")
 
-soc.tx_source('dma')
 try: sdr.tx_destroy_buffer()
 except Exception: pass
 sdr.tx_hardwaregain_chan0 = -89.75

@@ -32,7 +32,8 @@ scp -q "$HWH" "$HOST:$DEST/qick_e200.hwh"
 # __pycache__ gets written by root when the notebook or smoke test runs under
 # sudo, so a non-root deploy cannot delete it. It is regenerated anyway.
 rsync -az --delete --exclude '__pycache__' "$QICK/qick_lib/qick/" "$HOST:$DEST/qick/"
-scp -q "$here/tools/smoke_e200.py" "$here/tools/acq.py" "$HOST:$DEST/"
+scp -q "$here/tools/smoke_e200.py" "$here/tools/acq.py" \
+    "$here/tools/characterise_loopback.py" "$HOST:$DEST/"
 scp -q "$ANTSDR"/boards/e200/qick/notebooks/*.ipynb "$HOST:$NBDEST/"
 
 # PYNQ keys its parsed-metadata cache on the loaded bitstream, and a rebuild

@@ -46,8 +46,5 @@ print("  tproc  f_core=%s f_time=%s pmem=%s dmem=%s wmem=%s"
       % (t['f_core'], t['f_time'], t['pmem_size'], t['dmem_size'], t['wmem_size']))
 
 print("\n=== TX mux ===")
-print("  reset default:", soc.get_tx_source())
-soc.tx_source('qick');  print("  after set qick:", soc.get_tx_source())
-soc.tx_source('dma');   print("  restored to   :", soc.get_tx_source())
 
 print("\nSMOKE_OK")
