@@ -102,5 +102,7 @@ if len(amp) >= 2:
 
 try: sdr.tx_destroy_buffer()
 except Exception: pass
-sdr.tx_hardwaregain_chan0 = -89.75
+# QickSocE200 parks the radio in alert at exit anyway; do it here so the chip
+# starts cooling before the plotting and printing below finish.
+p("  radio parked in %s" % soc.standby())
 p("CHAR_DONE")

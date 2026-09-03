@@ -84,4 +84,5 @@ print("acquisition completed: shape %s, %d samples, peak |IQ| = %.1f"
 print("call counts:", calls)
 assert calls['single_read'] == 0 and calls['single_write'] == 0
 assert calls['load_mem'] > 0 and calls['read_mem'] > 0
+print("radio parked in %s" % soc.standby())
 print("DMA_ONLY_OK")
